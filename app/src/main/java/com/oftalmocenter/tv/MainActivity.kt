@@ -1,8 +1,15 @@
 package com.oftalmocenter.tv
 
 import android.annotation.SuppressLint
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -22,6 +29,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var fullscreenContainer: FrameLayout
     private lateinit var tts: TextToSpeech
     private var ttsReady = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
 
     inner class TTSBridge {
         @JavascriptInterface
@@ -60,6 +69,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
         configureWebView()
         webView.loadUrl(TV_URL)
+        registerConnectivityMonitor()
     }
 
     override fun onInit(status: Int) {
@@ -78,6 +88,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
             tts.setSpeechRate(0.95f)
             tts.setPitch(1.0f)
+
+            // Notifica o JavaScript quando o TTS termina de falar
+            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    mainHandler.post {
+                        webView.evaluateJavascript(
+                            "if(typeof window.tvTTSDone==='function') window.tvTTSDone()",
+                            null
+                        )
+                    }
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    mainHandler.post {
+                        webView.evaluateJavascript(
+                            "if(typeof window.tvTTSDone==='function') window.tvTTSDone()",
+                            null
+                        )
+                    }
+                }
+            })
         }
     }
 
@@ -157,6 +189,48 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         WebView.setWebContentsDebuggingEnabled(false)
     }
 
+    private fun registerConnectivityMonitor() {
+        val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        connectivityCallback = object : ConnectivityManager.NetworkCallback() {
+            private var reloadPending = false
+
+            override fun onAvailable(network: Network) {
+                mainHandler.post {
+                    webView.evaluateJavascript(
+                        "if(typeof window.tvSetOffline==='function') window.tvSetOffline(false)",
+                        null
+                    )
+                    if (reloadPending) {
+                        reloadPending = false
+                        // Dá 5s para o Firebase reconectar sozinho antes de forçar reload
+                        mainHandler.postDelayed({
+                            webView.evaluateJavascript(
+                                "(function(){ try { if(window.tvNeedsReload) { window.tvNeedsReload=false; location.reload(); } } catch(e){} })()",
+                                null
+                            )
+                        }, 5000)
+                    }
+                }
+            }
+
+            override fun onLost(network: Network) {
+                reloadPending = true
+                mainHandler.post {
+                    webView.evaluateJavascript(
+                        "if(typeof window.tvSetOffline==='function') window.tvSetOffline(true)",
+                        null
+                    )
+                }
+            }
+        }
+
+        cm.registerNetworkCallback(request, connectivityCallback!!)
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             webView.reload()
@@ -189,6 +263,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         super.onDestroy()
+        connectivityCallback?.let {
+            val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager
+            cm?.unregisterNetworkCallback(it)
+        }
+        connectivityCallback = null
         tts.stop()
         tts.shutdown()
         webView.destroy()
