@@ -1,6 +1,8 @@
 package com.oftalmocenter.tv
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -8,6 +10,7 @@ import android.net.NetworkRequest
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.KeyEvent
@@ -31,7 +34,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var ttsReady = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
+    private var wakeLock: PowerManager.WakeLock? = null
 
+    // ===== TTS Bridge (JavaScript ↔ Android) =====
     inner class TTSBridge {
         @JavascriptInterface
         fun speak(text: String) {
@@ -44,15 +49,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         fun isReady(): Boolean = ttsReady
     }
 
+    // ===== LIFECYCLE =====
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         tts = TextToSpeech(this, this)
 
+        // Flags de tela: mantém ligada, fullscreen, imersivo
         window.apply {
             addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+            // Impede que o Fire TV mostre screensaver sobre o app
+            addFlags(WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+            addFlags(WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD)
             decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -63,6 +74,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             )
         }
 
+        // WakeLock: impede que a CPU entre em deep sleep
+        acquireWakeLock()
+
         setContentView(R.layout.activity_main)
         fullscreenContainer = findViewById(R.id.fullscreen_container)
         webView = findViewById(R.id.webview)
@@ -70,6 +84,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         configureWebView()
         webView.loadUrl(TV_URL)
         registerConnectivityMonitor()
+
+        // Desabilita o screensaver do Fire TV programaticamente
+        disableFireTVScreensaver()
     }
 
     override fun onInit(status: Int) {
@@ -112,6 +129,107 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             })
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        // Reforça fullscreen imersivo sempre que voltar ao app
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            or View.SYSTEM_UI_FLAG_FULLSCREEN
+            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        )
+        // Readquire WakeLock caso tenha sido liberado
+        acquireWakeLock()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Intencionalmente NÃO pausamos o WebView
+        // Mantém o YouTube e Firebase listener ativos em background
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        releaseWakeLock()
+        connectivityCallback?.let {
+            val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager
+            cm?.unregisterNetworkCallback(it)
+        }
+        connectivityCallback = null
+        tts.stop()
+        tts.shutdown()
+        webView.destroy()
+    }
+
+    // Se o app for removido da memória pelo sistema, reinicia automaticamente
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        // Reagenda o app para iniciar novamente
+        val restartIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        mainHandler.postDelayed({
+            startActivity(restartIntent)
+        }, 2000)
+    }
+
+    // ===== WAKELOCK =====
+
+    @SuppressLint("WakelockTimeout")
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "OftalmoCenterTV::KeepAlive"
+        )
+        wakeLock?.acquire() // Sem timeout — mantém indefinidamente
+    }
+
+    private fun releaseWakeLock() {
+        wakeLock?.let {
+            if (it.isHeld) it.release()
+        }
+        wakeLock = null
+    }
+
+    // ===== FIRE TV SCREENSAVER =====
+
+    private fun disableFireTVScreensaver() {
+        try {
+            // Tenta desabilitar o screensaver via Settings do sistema
+            // Funciona em Fire TV com permissões normais
+            android.provider.Settings.Secure.putInt(
+                contentResolver,
+                "screensaver_enabled",
+                0
+            )
+        } catch (_: Exception) {
+            // Se não tiver permissão, ignora silenciosamente
+            // FLAG_KEEP_SCREEN_ON já faz a maior parte do trabalho
+        }
+
+        // Envia comando para manter screensaver desabilitado periodicamente
+        // Fire TV pode reativar o screensaver após updates
+        mainHandler.postDelayed(object : Runnable {
+            override fun run() {
+                try {
+                    android.provider.Settings.Secure.putInt(
+                        contentResolver,
+                        "screensaver_enabled",
+                        0
+                    )
+                } catch (_: Exception) {}
+                mainHandler.postDelayed(this, 300_000) // A cada 5 minutos
+            }
+        }, 300_000)
+    }
+
+    // ===== WEBVIEW =====
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun configureWebView() {
@@ -165,8 +283,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 request: WebResourceRequest,
                 error: WebResourceError
             ) {
-                // Só recarrega na página principal, após 15s, e apenas uma vez
-                // Evita reiniciar o YouTube por falhas de rede momentâneas
                 if (request.isForMainFrame && !reloadScheduled) {
                     reloadScheduled = true
                     view.postDelayed({
@@ -189,6 +305,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         WebView.setWebContentsDebuggingEnabled(false)
     }
 
+    // ===== CONECTIVIDADE =====
+
     private fun registerConnectivityMonitor() {
         val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
         val request = NetworkRequest.Builder()
@@ -206,7 +324,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     )
                     if (reloadPending) {
                         reloadPending = false
-                        // Dá 5s para o Firebase reconectar sozinho antes de forçar reload
                         mainHandler.postDelayed({
                             webView.evaluateJavascript(
                                 "(function(){ try { if(window.tvNeedsReload) { window.tvNeedsReload=false; location.reload(); } } catch(e){} })()",
@@ -231,45 +348,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         cm.registerNetworkCallback(request, connectivityCallback!!)
     }
 
+    // ===== CONTROLE REMOTO =====
+    // Apenas o Back recarrega a página. Todo o resto funciona normal.
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             webView.reload()
             return true
         }
         return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // NÃO chamamos webView.onPause() nem webView.onResume()
-        // Isso mantém o JavaScript rodando continuamente
-        // evitando que o YouTube seja interrompido quando o FireTV
-        // muda de foco, exibe notificações ou sai do screensaver
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-            or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-            or View.SYSTEM_UI_FLAG_FULLSCREEN
-            or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-        )
-    }
-
-    override fun onPause() {
-        super.onPause()
-        // Intencionalmente não pausamos o WebView
-        // para manter o YouTube e o Firebase listener ativos
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        connectivityCallback?.let {
-            val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager
-            cm?.unregisterNetworkCallback(it)
-        }
-        connectivityCallback = null
-        tts.stop()
-        tts.shutdown()
-        webView.destroy()
     }
 }
