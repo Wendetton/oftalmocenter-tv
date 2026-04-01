@@ -2,7 +2,6 @@ package com.oftalmocenter.tv
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -84,9 +83,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         configureWebView()
         webView.loadUrl(TV_URL)
         registerConnectivityMonitor()
-
-        // Desabilita o screensaver do Fire TV programaticamente
-        disableFireTVScreensaver()
     }
 
     override fun onInit(status: Int) {
@@ -164,19 +160,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         webView.destroy()
     }
 
-    // Se o app for removido da memória pelo sistema, reinicia automaticamente
-    override fun onTaskRemoved(rootIntent: Intent?) {
-        super.onTaskRemoved(rootIntent)
-        // Reagenda o app para iniciar novamente
-        val restartIntent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        mainHandler.postDelayed({
-            startActivity(restartIntent)
-        }, 2000)
-    }
-
     // ===== WAKELOCK =====
 
     @SuppressLint("WakelockTimeout")
@@ -195,38 +178,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (it.isHeld) it.release()
         }
         wakeLock = null
-    }
-
-    // ===== FIRE TV SCREENSAVER =====
-
-    private fun disableFireTVScreensaver() {
-        try {
-            // Tenta desabilitar o screensaver via Settings do sistema
-            // Funciona em Fire TV com permissões normais
-            android.provider.Settings.Secure.putInt(
-                contentResolver,
-                "screensaver_enabled",
-                0
-            )
-        } catch (_: Exception) {
-            // Se não tiver permissão, ignora silenciosamente
-            // FLAG_KEEP_SCREEN_ON já faz a maior parte do trabalho
-        }
-
-        // Envia comando para manter screensaver desabilitado periodicamente
-        // Fire TV pode reativar o screensaver após updates
-        mainHandler.postDelayed(object : Runnable {
-            override fun run() {
-                try {
-                    android.provider.Settings.Secure.putInt(
-                        contentResolver,
-                        "screensaver_enabled",
-                        0
-                    )
-                } catch (_: Exception) {}
-                mainHandler.postDelayed(this, 300_000) // A cada 5 minutos
-            }
-        }, 300_000)
     }
 
     // ===== WEBVIEW =====
