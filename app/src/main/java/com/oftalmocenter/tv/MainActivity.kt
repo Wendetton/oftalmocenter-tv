@@ -12,7 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import java.util.Locale
 
 // ⚙️ CONFIGURAÇÃO — altere aqui a URL do seu sistema
-private const val TV_URL = "https://webtv-chi.vercel.app/tv"
+private const val TV_URL = "https://SEU-PROJETO.vercel.app/tv"
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
@@ -23,7 +23,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var tts: TextToSpeech
     private var ttsReady = false
 
-    // Ponte JavaScript → Android TTS nativo
     inner class TTSBridge {
         @JavascriptInterface
         fun speak(text: String) {
@@ -40,10 +39,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Inicia TTS nativo do Android
         tts = TextToSpeech(this, this)
 
-        // Tela cheia real
         window.apply {
             addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
@@ -65,27 +62,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         webView.loadUrl(TV_URL)
     }
 
-    // Callback quando TTS inicializa
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            // Tenta português Brasil, aceita qualquer língua disponível
             val result = tts.setLanguage(Locale("pt", "BR"))
             ttsReady = result != TextToSpeech.LANG_MISSING_DATA
                     && result != TextToSpeech.LANG_NOT_SUPPORTED
-
             if (!ttsReady) {
-                // Fallback: tenta português Portugal
                 val fallback = tts.setLanguage(Locale("pt", "PT"))
                 ttsReady = fallback != TextToSpeech.LANG_MISSING_DATA
                         && fallback != TextToSpeech.LANG_NOT_SUPPORTED
             }
-
             if (!ttsReady) {
-                // Último recurso: idioma padrão do dispositivo
                 tts.setLanguage(Locale.getDefault())
                 ttsReady = true
             }
-
             tts.setSpeechRate(0.95f)
             tts.setPitch(1.0f)
         }
@@ -110,7 +100,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             displayZoomControls = false
         }
 
-        // Registra a ponte TTS — acessível via window.AndroidTTS.speak()
         webView.addJavascriptInterface(TTSBridge(), "AndroidTTS")
 
         webView.webChromeClient = object : WebChromeClient() {
@@ -137,14 +126,26 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
 
         webView.webViewClient = object : WebViewClient() {
+            private var reloadScheduled = false
+
             override fun onReceivedError(
                 view: WebView,
                 request: WebResourceRequest,
                 error: WebResourceError
             ) {
-                if (request.isForMainFrame) {
-                    view.postDelayed({ view.reload() }, 5000)
+                // Só recarrega na página principal, após 15s, e apenas uma vez
+                // Evita reiniciar o YouTube por falhas de rede momentâneas
+                if (request.isForMainFrame && !reloadScheduled) {
+                    reloadScheduled = true
+                    view.postDelayed({
+                        reloadScheduled = false
+                        view.reload()
+                    }, 15000)
                 }
+            }
+
+            override fun onPageFinished(view: WebView, url: String) {
+                reloadScheduled = false
             }
 
             override fun shouldOverrideUrlLoading(
@@ -152,6 +153,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 request: WebResourceRequest
             ): Boolean = false
         }
+
+        WebView.setWebContentsDebuggingEnabled(false)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -164,7 +167,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onResume() {
         super.onResume()
-        webView.onResume()
+        // NÃO chamamos webView.onPause() nem webView.onResume()
+        // Isso mantém o JavaScript rodando continuamente
+        // evitando que o YouTube seja interrompido quando o FireTV
+        // muda de foco, exibe notificações ou sai do screensaver
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE
             or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -177,7 +183,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     override fun onPause() {
         super.onPause()
-        webView.onPause()
+        // Intencionalmente não pausamos o WebView
+        // para manter o YouTube e o Firebase listener ativos
     }
 
     override fun onDestroy() {
