@@ -12,7 +12,7 @@ import androidx.appcompat.app.AppCompatActivity
 import java.util.Locale
 
 // ⚙️ CONFIGURAÇÃO — altere aqui a URL do seu sistema
-private const val TV_URL = "https://SEU-PROJETO.vercel.app/tv"
+private const val TV_URL = "https://webtv-chi.vercel.app/tv"
 
 class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
