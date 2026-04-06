@@ -162,15 +162,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     // ===== WAKELOCK =====
 
-    @SuppressLint("WakelockTimeout")
+    @Suppress("DEPRECATION")
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
+            PowerManager.FULL_WAKE_LOCK
+                    or PowerManager.ACQUIRE_CAUSES_WAKEUP
+                    or PowerManager.ON_AFTER_RELEASE,
             "OftalmoCenterTV::KeepAlive"
         )
-        wakeLock?.acquire() // Sem timeout — mantém indefinidamente
+        wakeLock?.acquire(4 * 60 * 60 * 1000L) // 4 horas — renovado no onResume
     }
 
     private fun releaseWakeLock() {
