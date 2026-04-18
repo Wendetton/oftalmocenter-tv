@@ -2,6 +2,8 @@ package com.oftalmocenter.tv
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -10,6 +12,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
+import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.KeyEvent
@@ -34,6 +37,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var connectivityCallback: ConnectivityManager.NetworkCallback? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var screenStateReceiver: ScreenStateReceiver? = null
 
     // ===== TTS Bridge (JavaScript ↔ Android) =====
     inner class TTSBridge {
@@ -83,6 +87,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         configureWebView()
         webView.loadUrl(TV_URL)
         registerConnectivityMonitor()
+        registerScreenStateReceiver()
+        maximizeScreenOffTimeout()
     }
 
     override fun onInit(status: Int) {
@@ -150,6 +156,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         super.onDestroy()
         releaseWakeLock()
+        screenStateReceiver?.let { unregisterReceiver(it) }
+        screenStateReceiver = null
         connectivityCallback?.let {
             val cm = getSystemService(CONNECTIVITY_SERVICE) as? ConnectivityManager
             cm?.unregisterNetworkCallback(it)
@@ -185,6 +193,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             if (it.isHeld) it.release()
         }
         wakeLock = null
+    }
+
+    // ===== SCREEN STATE =====
+
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+    private fun registerScreenStateReceiver() {
+        screenStateReceiver = ScreenStateReceiver()
+        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        registerReceiver(screenStateReceiver, filter)
+    }
+
+    private fun maximizeScreenOffTimeout() {
+        try {
+            if (Settings.System.canWrite(this)) {
+                Settings.System.putInt(
+                    contentResolver,
+                    Settings.System.SCREEN_OFF_TIMEOUT,
+                    Int.MAX_VALUE
+                )
+            } else {
+                startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS).apply {
+                    data = android.net.Uri.parse("package:$packageName")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            }
+        } catch (_: Exception) {
+            // Fire TV pode não suportar — as outras camadas protegem
+        }
     }
 
     // ===== WEBVIEW =====
