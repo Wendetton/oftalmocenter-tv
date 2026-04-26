@@ -93,19 +93,31 @@ class PatientCallOverlay(
         val displayName = formatPatientName(nome)
         val displayRoom = formatRoomForCard(sala)
 
+        Log.i(TAG, "showCall(in): nome='$nome' sala='$sala' → display='$displayName'/'$displayRoom'")
+
         historyStore.add(nome, sala)
         renderHistory()
 
         if (isShowing && callName.text == displayName && callRoom.text == displayRoom) {
+            Log.i(TAG, "showCall: idempotente, conteúdo igual ao já exibido")
             return
         }
         callName.text = displayName
         callRoom.text = displayRoom
 
-        Log.i(TAG, "showCall: '$displayName' / '$displayRoom' (isShowing=$isShowing)")
+        // Garantir visibility VISIBLE explicitamente — algum cenário pode
+        // ter deixado o filho em estado inconsistente.
+        callName.visibility = View.VISIBLE
+        callRoom.visibility = View.VISIBLE
+        callName.requestLayout()
+        callRoom.requestLayout()
+        callCard.requestLayout()
+
+        Log.i(TAG, "showCall: callName.text='${callName.text}' visibility=${callName.visibility}")
+        Log.i(TAG, "showCall: callRoom.text='${callRoom.text}' visibility=${callRoom.visibility}")
 
         if (isShowing) {
-            // Card já visível, novo paciente: troca direto sem fade extra.
+            Log.i(TAG, "showCall: card já visível, apenas trocou conteúdo")
             return
         }
 
@@ -174,8 +186,16 @@ class PatientCallOverlay(
             return
         }
         row.visibility = View.VISIBLE
+        nameView.visibility = View.VISIBLE
+        roomView.visibility = View.VISIBLE
         nameView.text = formatPatientName(entry.nome)
         roomView.text = formatRoomForHistory(entry.sala)
+        nameView.requestLayout()
+        roomView.requestLayout()
+        Log.i(
+            TAG,
+            "renderRow: name='${nameView.text}' room='${roomView.text}' rowVis=${row.visibility}"
+        )
     }
 
     /**

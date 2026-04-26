@@ -6,6 +6,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#000000"
+    android:clipChildren="false"
+    android:clipToPadding="false"
     android:keepScreenOn="true">
 
     <!-- Vídeo fullscreen. A faixa branca e o card flutuante ficam por cima
@@ -197,18 +199,20 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:layout_marginStart="48dp"
-        android:layout_marginEnd="48dp"
-        android:layout_marginTop="48dp"
-        android:layout_marginBottom="180dp"
+        android:layout_marginStart="32dp"
+        android:layout_marginEnd="32dp"
+        android:layout_marginTop="24dp"
+        android:layout_marginBottom="40dp"
         android:orientation="vertical"
         android:gravity="start"
-        android:paddingStart="80dp"
-        android:paddingEnd="80dp"
-        android:paddingTop="60dp"
-        android:paddingBottom="60dp"
+        android:paddingStart="64dp"
+        android:paddingEnd="64dp"
+        android:paddingTop="40dp"
+        android:paddingBottom="40dp"
         android:background="@drawable/card_bg"
         android:elevation="12dp"
+        android:clipChildren="false"
+        android:clipToPadding="false"
         android:visibility="gone"
         android:alpha="0">
 
@@ -217,9 +221,10 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-medium"
-            android:textSize="22sp"
+            android:textSize="20sp"
             android:textColor="@color/brand_primary"
             android:letterSpacing="0.30"
+            android:includeFontPadding="false"
             android:text="ATENÇÃO PACIENTE" />
 
         <TextView
@@ -227,17 +232,18 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-black"
-            android:textSize="80sp"
+            android:textSize="56sp"
             android:textColor="@color/text_primary"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="14dp"
             android:lineSpacingMultiplier="0.95"
+            android:includeFontPadding="false"
             android:text="—" />
 
         <View
-            android:layout_width="80dp"
+            android:layout_width="72dp"
             android:layout_height="3dp"
-            android:layout_marginTop="28dp"
-            android:layout_marginBottom="20dp"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="14dp"
             android:background="@drawable/divider_accent" />
 
         <TextView
@@ -245,8 +251,10 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-medium"
-            android:textSize="44sp"
+            android:textSize="34sp"
             android:textColor="@color/brand_primary"
+            android:visibility="visible"
+            android:includeFontPadding="false"
             android:text="—" />
     </LinearLayout>
 
