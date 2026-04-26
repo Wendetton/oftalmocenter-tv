@@ -9,7 +9,9 @@ android {
 
     defaultConfig {
         applicationId "com.oftalmocenter.tv"
-        minSdk 22
+        // minSdk 23 alinhado com o app oficial NewPipe (devices abaixo são
+        // raríssimos em 2026 e o alvo é Fire TV Stick HD = API 28).
+        minSdk 23
         targetSdk 34
         versionCode 1
         versionName "1.0"
@@ -36,8 +38,10 @@ android {
     }
 
     compileOptions {
-        // NewPipe Extractor usa java.time/Optional/Stream — desugaring habilita
-        // essas APIs em devices abaixo da API 26.
+        // NewPipe Extractor usa java.time/Optional/Stream e — crucial — chama
+        // URLDecoder.decode(String, Charset), que só existe nativamente em
+        // Android 13+. A variante "_nio" do desugar_jdk_libs é a que cobre
+        // essa API. É a mesma escolha do app oficial NewPipe.
         coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
@@ -79,15 +83,7 @@ dependencies {
     implementation 'androidx.media3:media3-common:1.4.1'
 
     // NewPipe Extractor — extrai stream URL direto do YouTube (sem WebView).
-    // Excluímos o Jsoup transitivo: as versões 1.16+ usam
-    // URLDecoder.decode(String, Charset), que só existe nativamente em
-    // Android 13+ e não é coberto pelo desugar_jdk_libs. Travamos o Jsoup
-    // em 1.15.4 (jul/2022), última que usa apenas a API antiga
-    // URLDecoder.decode(String, String) suportada desde a API 1.
-    implementation('com.github.TeamNewPipe:NewPipeExtractor:v0.26.1') {
-        exclude group: 'org.jsoup', module: 'jsoup'
-    }
-    implementation 'org.jsoup:jsoup:1.15.4'
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.1'
 
     // OkHttp — usado pela nossa implementação de Downloader do NewPipe.
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
@@ -95,6 +91,8 @@ dependencies {
     // Coroutines (usado pelo VideoPlayerManager e fases futuras)
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
 
-    // Necessário para core library desugaring (java.time etc.)
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+    // Variante "_nio" do desugar_jdk_libs: cobre java.time + java.nio +
+    // java.net.URLDecoder.decode(String, Charset) usado pelo NewPipe.
+    // Versão e variante alinhadas com o app oficial NewPipe.
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
 }
