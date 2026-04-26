@@ -31,10 +31,12 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
 
-        // URL de teste — Big Buck Bunny (sample público do Google, HTTPS).
-        // Será substituído por stream do YouTube na Fase 2.
+        // URL de teste — Sintel Trailer (sample do W3C, HTTPS, mp4 H.264).
+        // Estável e mantido pelo próprio W3C; substitui o Big Buck Bunny do
+        // Google que passou a responder HTTP 403. Será trocado por stream
+        // do YouTube na Fase 2.
         private const val TEST_VIDEO_URL =
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+            "https://media.w3.org/2010/05/sintel/trailer.mp4"
     }
 
     private lateinit var playerView: PlayerView
