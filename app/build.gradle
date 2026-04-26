@@ -15,6 +15,19 @@ android {
         versionName "1.0"
     }
 
+    // Chave fixa de debug versionada no repositório.
+    // Mantém a mesma assinatura entre builds do CI, evitando o erro
+    // INSTALL_FAILED_UPDATE_INCOMPATIBLE ao reinstalar via `adb install -r`.
+    // É um keystore de debug — sem valor de segurança em produção.
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
