@@ -72,6 +72,7 @@ class FirestorePoller(
     private var lastVideoId: String? = null
     private var lastVolume: Int? = null
     private var lastAnnounceNonce: String? = null
+    private var lastAnnounceIdle: Boolean = true
     private var lastAudioConfig: AudioConfig? = null
 
     fun start() {
@@ -146,28 +147,38 @@ class FirestorePoller(
 
     /**
      * Pega o estado de chamada do `config/announce`. Dispara o callback
-     * sempre que o `nonce` muda (nova chamada) E quando volta a `idle=true`
-     * — esse último caso garante que o overlay seja escondido no fim.
+     * APENAS em duas situações:
+     *   1) `nonce` mudou → nova chamada (idle costuma ser false aqui).
+     *   2) `idle` passou de false → true → fim da chamada (mesmo nonce).
+     *
+     * Sem essa filtragem, idle=false dispararia o callback a cada poll
+     * (1s) e a fila do AudioOrchestrator encheria de duplicatas da mesma
+     * chamada.
      */
     private suspend fun pollAnnounceOnce() {
         try {
             val doc = fetchDocument("config/announce") ?: return
             val nonce = doc.fieldString("nonce") ?: return
-
-            // Disparar quando o nonce muda OU quando o estado idle pode ter
-            // mudado mesmo com mesmo nonce (raro, mas defensivo: o admin web
-            // pode setar idle=true mantendo o nonce).
             val idle = doc.fieldBoolean("idle") ?: true
+
+            val isNewCall = nonce != lastAnnounceNonce
+            val isEndOfCall = !lastAnnounceIdle && idle
+            if (!isNewCall && !isEndOfCall) {
+                // Estado estável (mesmo nonce, idle igual ao anterior).
+                return
+            }
+
+            lastAnnounceNonce = nonce
+            lastAnnounceIdle = idle
+
             val nome = doc.fieldString("nome")?.takeIf { it.isNotBlank() }
             val sala = doc.fieldString("sala")?.takeIf { it.isNotBlank() }
 
-            val nonceChanged = nonce != lastAnnounceNonce
-            if (!nonceChanged && idle) {
-                // Estado já está idle desde a última checagem; nada mudou.
-                return
-            }
-            lastAnnounceNonce = nonce
-            Log.i(TAG, "announce: nonce=$nonce idle=$idle nome=$nome sala=$sala")
+            Log.i(
+                TAG,
+                "announce mudou: nonce=$nonce idle=$idle nome=$nome sala=$sala " +
+                    "(${if (isNewCall) "NOVA" else "FIM"})"
+            )
             withContext(Dispatchers.Main) { onCallStateChanged(idle, nome, sala) }
         } catch (t: Throwable) {
             Log.w(TAG, "erro no pollAnnounce: ${t.message}")
