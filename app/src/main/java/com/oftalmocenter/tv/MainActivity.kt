@@ -8,22 +8,28 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import com.oftalmocenter.tv.player.StreamSource
 import com.oftalmocenter.tv.player.VideoPlayerManager
+import com.oftalmocenter.tv.player.YouTubeExtractor
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
- * MainActivity — Fase 1 (player nativo básico).
+ * MainActivity — Fase 2 (YouTube nativo via NewPipe Extractor).
  *
- * Reproduz uma URL de teste em mp4 (Big Buck Bunny) em loop usando ExoPlayer
- * com SurfaceView, para validar que o hardware decoder do Fire TV está sendo
- * utilizado. Não há WebView, Firestore, TTS ou overlay nesta fase — esses
- * componentes voltam nas fases seguintes.
+ * Pega uma URL do YouTube, extrai a URL real de stream em background,
+ * entrega ao ExoPlayer e agenda re-extração preventiva. Em caso de erro
+ * de fonte (URL expirada, 403), re-extrai com backoff exponencial.
  *
- * O que foi preservado da versão anterior:
- *  - WakeLock FULL_WAKE_LOCK (impede o Fire TV de entrar em standby)
- *  - Flags de fullscreen / imersivo
- *  - BootReceiver (autostart) inalterado
+ * Sem WebView, sem Firestore, sem TTS. Esses entram em fases seguintes.
+ *
+ * Mantido da Fase 1: WakeLock FULL_WAKE_LOCK, fullscreen/imersivo,
+ * BootReceiver inalterado.
  */
 @UnstableApi
 class MainActivity : AppCompatActivity() {
@@ -31,17 +37,24 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
 
-        // URL de teste — Sintel Trailer (sample do W3C, HTTPS, mp4 H.264).
-        // Estável e mantido pelo próprio W3C; substitui o Big Buck Bunny do
-        // Google que passou a responder HTTP 403. Será trocado por stream
-        // do YouTube na Fase 2.
-        private const val TEST_VIDEO_URL =
-            "https://media.w3.org/2010/05/sintel/trailer.mp4"
+        // URL do YouTube de teste (Fase 2). Será trocada pelo Firestore na Fase 3.
+        private const val YOUTUBE_URL = "https://www.youtube.com/watch?v=PRAGLqfNK1o"
+
+        // Re-extração preventiva: streams do YouTube costumam expirar entre 4-6h;
+        // 3h dá uma boa margem para refresh transparente antes do 403.
+        private const val REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000L
+
+        // Backoff de retry após erro: 5s, 10s, 20s, 40s, 60s, 60s, ...
+        private val BACKOFF_STEPS_MS = longArrayOf(5_000, 10_000, 20_000, 40_000, 60_000)
     }
 
     private lateinit var playerView: PlayerView
     private lateinit var videoPlayerManager: VideoPlayerManager
     private var wakeLock: PowerManager.WakeLock? = null
+
+    private var currentJob: Job? = null
+    private var refreshJob: Job? = null
+    private var consecutiveFailures = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,10 +66,14 @@ class MainActivity : AppCompatActivity() {
         playerView = findViewById(R.id.player_view)
 
         videoPlayerManager = VideoPlayerManager(this)
+        videoPlayerManager.onSourceError = { error ->
+            Log.w(TAG, "source error → re-extraindo. code=${error.errorCodeName}")
+            loadYouTube(YOUTUBE_URL, isRetry = true)
+        }
         playerView.player = videoPlayerManager.player
         playerView.useController = false
 
-        videoPlayerManager.playStream(TEST_VIDEO_URL)
+        loadYouTube(YOUTUBE_URL)
     }
 
     override fun onResume() {
@@ -74,18 +91,60 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         releaseWakeLock()
+        currentJob?.cancel()
+        refreshJob?.cancel()
         playerView.player = null
         videoPlayerManager.release()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        // Fase 1: tecla Voltar reinicia o vídeo do começo, útil para teste manual.
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            Log.i(TAG, "BACK pressed → seek to 0")
-            videoPlayerManager.player.seekTo(0)
+            Log.i(TAG, "BACK pressed → re-extrair YouTube")
+            loadYouTube(YOUTUBE_URL)
             return true
         }
         return super.onKeyDown(keyCode, event)
+    }
+
+    /**
+     * Extrai e reproduz a URL do YouTube. Cancela qualquer extração em
+     * andamento. Em caso de erro, agenda retry com backoff. Em caso de
+     * sucesso, agenda re-extração preventiva em 3h.
+     */
+    private fun loadYouTube(youtubeUrl: String, isRetry: Boolean = false) {
+        currentJob?.cancel()
+        refreshJob?.cancel()
+
+        currentJob = lifecycleScope.launch {
+            try {
+                val source: StreamSource = YouTubeExtractor.extract(youtubeUrl)
+                consecutiveFailures = 0
+                videoPlayerManager.playStream(source)
+                scheduleRefresh(youtubeUrl)
+            } catch (ce: CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                consecutiveFailures += 1
+                val backoffMs = BACKOFF_STEPS_MS[
+                    (consecutiveFailures - 1).coerceIn(0, BACKOFF_STEPS_MS.size - 1)
+                ]
+                Log.e(
+                    TAG,
+                    "extração falhou (#$consecutiveFailures) — retry em ${backoffMs}ms: ${t.message}",
+                    t
+                )
+                delay(backoffMs)
+                loadYouTube(youtubeUrl, isRetry = true)
+            }
+        }
+    }
+
+    private fun scheduleRefresh(youtubeUrl: String) {
+        refreshJob = lifecycleScope.launch {
+            delay(REFRESH_INTERVAL_MS)
+            Log.i(TAG, "refresh preventivo (3h) → re-extraindo")
+            loadYouTube(youtubeUrl)
+        }
     }
 
     private fun applyFullscreenFlags() {

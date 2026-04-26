@@ -36,6 +36,9 @@ android {
     }
 
     compileOptions {
+        // NewPipe Extractor usa java.time/Optional/Stream — desugaring habilita
+        // essas APIs em devices abaixo da API 26.
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
@@ -43,19 +46,47 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
+
+    packagingOptions {
+        // NewPipe Extractor traz vários META-INF de licenças.
+        resources {
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/license.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt',
+                'META-INF/notice.txt',
+                'META-INF/ASL2.0',
+                'META-INF/*.kotlin_module'
+            ]
+        }
+    }
 }
 
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
 
     // Media3 / ExoPlayer — reprodução de vídeo via hardware decoder
     implementation 'androidx.media3:media3-exoplayer:1.4.1'
     implementation 'androidx.media3:media3-ui:1.4.1'
     implementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
     implementation 'androidx.media3:media3-exoplayer-dash:1.4.1'
+    implementation 'androidx.media3:media3-datasource:1.4.1'
     implementation 'androidx.media3:media3-common:1.4.1'
+
+    // NewPipe Extractor — extrai stream URL direto do YouTube (sem WebView).
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.1'
+
+    // OkHttp — usado pela nossa implementação de Downloader do NewPipe.
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
     // Coroutines (usado pelo VideoPlayerManager e fases futuras)
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // Necessário para core library desugaring (java.time etc.)
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
 }

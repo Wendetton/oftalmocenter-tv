@@ -7,9 +7,12 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.DecoderReuseEvaluation
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 
 /**
  * Encapsula o ciclo de vida de um único ExoPlayer reaproveitável.
@@ -22,7 +25,17 @@ class VideoPlayerManager(private val context: Context) {
 
     companion object {
         private const val TAG = "VideoPlayerManager"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 9; AFTSS Build/PS7233) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     }
+
+    /**
+     * Callback chamado quando o player reporta erro provavelmente associado
+     * à fonte (URL expirada, 403, parsing). A camada acima decide se
+     * re-extrai do YouTube.
+     */
+    var onSourceError: ((PlaybackException) -> Unit)? = null
 
     // Os listeners precisam ser inicializados ANTES da propriedade `player`
     // porque o bloco `apply { addListener(...) }` é executado durante a
@@ -41,7 +54,23 @@ class VideoPlayerManager(private val context: Context) {
 
         override fun onPlayerError(error: PlaybackException) {
             Log.e(TAG, "player error: ${error.errorCodeName} | ${error.message}", error)
+            if (isSourceLikelyError(error)) {
+                onSourceError?.invoke(error)
+            }
         }
+    }
+
+    private fun isSourceLikelyError(error: PlaybackException): Boolean {
+        return error.errorCode in setOf(
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+            PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+            PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE,
+            PlaybackException.ERROR_CODE_IO_UNSPECIFIED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED
+        )
     }
 
     private val decoderListener = object : AnalyticsListener {
@@ -102,6 +131,7 @@ class VideoPlayerManager(private val context: Context) {
         addAnalyticsListener(decoderListener)
     }
 
+    /** Reproduz uma URL HTTP simples (mp4 progressivo). */
     fun playStream(url: String) {
         Log.i(TAG, "playStream: $url")
         val item = MediaItem.fromUri(url)
@@ -109,6 +139,41 @@ class VideoPlayerManager(private val context: Context) {
         player.prepare()
         player.playWhenReady = true
     }
+
+    /**
+     * Reproduz um [StreamSource]. Se for adaptive (vídeo+áudio separados),
+     * combina via MergingMediaSource — única forma do ExoPlayer tocar os
+     * dois streams sincronizados como um único MediaItem.
+     */
+    fun playStream(source: StreamSource) {
+        Log.i(
+            TAG,
+            "playStream: '${source.title}' ${source.resolution} " +
+                if (source.isAdaptive) "(adaptive)" else "(progressive)"
+        )
+
+        if (!source.isAdaptive) {
+            playStream(source.videoUrl)
+            return
+        }
+
+        // Adaptive: vídeo-only + áudio-only -> MergingMediaSource.
+        // User-Agent customizado evita 403 raros que o YouTube manda para
+        // requests sem identificação típica de browser.
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(USER_AGENT)
+            .setAllowCrossProtocolRedirects(true)
+
+        val videoMs = ProgressiveMediaSource.Factory(httpFactory)
+            .createMediaSource(MediaItem.fromUri(source.videoUrl))
+        val audioMs = ProgressiveMediaSource.Factory(httpFactory)
+            .createMediaSource(MediaItem.fromUri(source.audioUrl!!))
+
+        player.setMediaSource(MergingMediaSource(videoMs, audioMs))
+        player.prepare()
+        player.playWhenReady = true
+    }
+
 
     fun setVolume(percent: Int) {
         val v = (percent.coerceIn(0, 100)) / 100f
