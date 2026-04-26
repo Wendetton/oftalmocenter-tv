@@ -91,8 +91,14 @@ dependencies {
 
     // Firebase Firestore (sem autenticação — as Security Rules do projeto
     // webtv-ee904 são abertas para os paths usados, igual ao app web).
+    // Excluímos `protolite-well-known-types`: ele se sobrepõe ao
+    // `protobuf-javalite` moderno (mesmas classes DescriptorProtos*),
+    // causando "checkDuplicateClasses". O javalite cobre tudo que o
+    // protolite expõe.
     implementation platform('com.google.firebase:firebase-bom:33.7.0')
-    implementation 'com.google.firebase:firebase-firestore-ktx'
+    implementation('com.google.firebase:firebase-firestore-ktx') {
+        exclude group: 'com.google.firebase', module: 'protolite-well-known-types'
+    }
 
     // Coroutines (usado pelo VideoPlayerManager e fases futuras)
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
