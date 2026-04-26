@@ -1,9 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Paleta da marca Oftalmocenter (extraída do logo) -->
+    <color name="brand_primary">#FF2845A0</color>     <!-- azul escuro do logo -->
+    <color name="brand_accent">#FF5DBCE4</color>      <!-- azul claro do logo -->
+
+    <!-- Tema claro premium -->
+    <color name="panel_bg">#FFFFFFFF</color>          <!-- branco puro da faixa -->
+    <color name="card_bg">#FFFFFFFF</color>           <!-- branco do card -->
+    <color name="text_primary">#FF1A1A1A</color>      <!-- cinza-escuro elegante -->
+    <color name="text_secondary">#FF555555</color>    <!-- cinza médio -->
+    <color name="text_muted">#FF888888</color>        <!-- cinza claro -->
+    <color name="divider">#FFE5E5E5</color>           <!-- cinza muito claro -->
+
+    <!-- Compatibilidade com nomes da Fase 4 (ainda referenciados em alguns lugares) -->
     <color name="overlay_bg_dim">#A0000000</color>
     <color name="overlay_bg_solid">#E6080C12</color>
     <color name="overlay_text_primary">#FFFFFFFF</color>
     <color name="overlay_text_secondary">#FFFEFEFE</color>
-    <color name="overlay_accent">#FF5BB8D4</color>
+    <color name="overlay_accent">#FF5DBCE4</color>
     <color name="overlay_muted">#CCFFFFFF</color>
 </resources>

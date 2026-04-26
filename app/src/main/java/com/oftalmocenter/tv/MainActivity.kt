@@ -14,6 +14,7 @@ import androidx.media3.ui.PlayerView
 import com.oftalmocenter.tv.audio.AudioOrchestrator
 import com.oftalmocenter.tv.audio.TTSManager
 import com.oftalmocenter.tv.cache.CacheManager
+import com.oftalmocenter.tv.cache.CallHistoryStore
 import com.oftalmocenter.tv.firestore.FirestorePoller
 import com.oftalmocenter.tv.monitoring.CrashHandler
 import com.oftalmocenter.tv.monitoring.HeartbeatService
@@ -63,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playerView: PlayerView
     private lateinit var videoPlayerManager: VideoPlayerManager
     private lateinit var cache: CacheManager
+    private lateinit var historyStore: CallHistoryStore
     private lateinit var firestorePoller: FirestorePoller
     private lateinit var callOverlay: PatientCallOverlay
     private lateinit var ttsManager: TTSManager
@@ -90,7 +92,12 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         playerView = findViewById(R.id.player_view)
 
-        callOverlay = PatientCallOverlay(findViewById(R.id.root_container))
+        historyStore = CallHistoryStore(this)
+        callOverlay = PatientCallOverlay(
+            rootView = findViewById(R.id.root_container),
+            historyStore = historyStore,
+            displayMetrics = resources.displayMetrics
+        )
         callOverlay.start()
 
         cache = CacheManager(this)

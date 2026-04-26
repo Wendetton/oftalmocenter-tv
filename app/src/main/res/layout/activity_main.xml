@@ -8,6 +8,8 @@
     android:background="#000000"
     android:keepScreenOn="true">
 
+    <!-- Vídeo fullscreen. A faixa branca e o card flutuante ficam por cima
+         (overlay), sem alterar o aspect ratio do vídeo. -->
     <androidx.media3.ui.PlayerView
         android:id="@+id/player_view"
         android:layout_width="match_parent"
@@ -18,94 +20,225 @@
         app:use_controller="false"
         app:show_buffering="never" />
 
-    <!-- ESTADO IDLE: barra discreta no rodapé direito (relógio + logo). -->
+    <!-- ============================================================ -->
+    <!-- FAIXA INFERIOR (sempre visível): logo + histórico de chamadas -->
+    <!-- Altura ajustada em runtime para 12% da tela (MainActivity).   -->
+    <!-- ============================================================ -->
     <LinearLayout
-        android:id="@+id/idle_bar"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|end"
+        android:id="@+id/bottom_bar"
+        android:layout_width="match_parent"
+        android:layout_height="100dp"
+        android:layout_gravity="bottom"
         android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="24dp"
-        android:paddingEnd="24dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="12dp"
-        android:background="@color/overlay_bg_dim">
+        android:background="@color/panel_bg">
 
-        <TextView
-            android:id="@+id/idle_clock"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="sans-serif-light"
-            android:textSize="22sp"
-            android:textColor="@color/overlay_muted"
-            android:text="00:00" />
+        <!-- Logo da clínica (~22% da largura) -->
+        <ImageView
+            android:id="@+id/logo_image"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="22"
+            android:paddingStart="32dp"
+            android:paddingEnd="24dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:scaleType="fitCenter"
+            android:adjustViewBounds="true"
+            android:contentDescription="Oftalmocenter"
+            android:src="@drawable/logo_oftalmocenter" />
 
+        <!-- Divisor vertical fino em accent -->
         <View
-            android:layout_width="1dp"
-            android:layout_height="20dp"
-            android:layout_marginStart="16dp"
-            android:layout_marginEnd="16dp"
-            android:background="@color/overlay_muted"
-            android:alpha="0.4" />
+            android:layout_width="2dp"
+            android:layout_height="match_parent"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="20dp"
+            android:background="@drawable/divider_accent" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="sans-serif-medium"
-            android:textSize="16sp"
-            android:textColor="@color/overlay_muted"
-            android:letterSpacing="0.18"
-            android:text="OFTALMOCENTER" />
+        <!-- Lado direito: header + lista -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="78"
+            android:orientation="vertical"
+            android:paddingStart="32dp"
+            android:paddingEnd="32dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:textSize="14sp"
+                android:textColor="@color/brand_primary"
+                android:letterSpacing="0.20"
+                android:text="ÚLTIMAS CHAMADAS" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="6dp"
+                android:background="@color/divider" />
+
+            <!-- Lista de 3 entradas. Visibilidade controlada em código. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:weightSum="3">
+
+                <LinearLayout
+                    android:id="@+id/history_row_1"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/history_name_1"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif"
+                        android:textSize="20sp"
+                        android:textColor="@color/text_primary"
+                        android:singleLine="true"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/history_room_1"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-light"
+                        android:textSize="20sp"
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginStart="16dp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/history_row_2"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/history_name_2"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif"
+                        android:textSize="20sp"
+                        android:textColor="@color/text_primary"
+                        android:singleLine="true"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/history_room_2"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-light"
+                        android:textSize="20sp"
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginStart="16dp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/history_row_3"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/history_name_3"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:fontFamily="sans-serif"
+                        android:textSize="20sp"
+                        android:textColor="@color/text_primary"
+                        android:singleLine="true"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/history_room_3"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="sans-serif-light"
+                        android:textSize="20sp"
+                        android:textColor="@color/text_secondary"
+                        android:layout_marginStart="16dp" />
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
 
-    <!-- ESTADO CHAMANDO: painel grande no rodapé com nome e sala. -->
+    <!-- ============================================================ -->
+    <!-- CARD FLUTUANTE — só visível durante chamada                  -->
+    <!-- Centralizado verticalmente um pouco acima do meio.           -->
+    <!-- ============================================================ -->
     <LinearLayout
-        android:id="@+id/call_panel"
-        android:layout_width="match_parent"
+        android:id="@+id/call_card"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
+        android:layout_gravity="center"
+        android:layout_marginStart="48dp"
+        android:layout_marginEnd="48dp"
+        android:layout_marginTop="48dp"
+        android:layout_marginBottom="180dp"
         android:orientation="vertical"
-        android:gravity="center"
-        android:paddingStart="48dp"
-        android:paddingEnd="48dp"
-        android:paddingTop="40dp"
-        android:paddingBottom="32dp"
-        android:background="@color/overlay_bg_solid"
+        android:gravity="start"
+        android:paddingStart="80dp"
+        android:paddingEnd="80dp"
+        android:paddingTop="60dp"
+        android:paddingBottom="60dp"
+        android:background="@drawable/card_bg"
+        android:elevation="12dp"
         android:visibility="gone"
         android:alpha="0">
 
         <TextView
+            android:id="@+id/card_header"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-medium"
-            android:textSize="20sp"
-            android:textColor="@color/overlay_accent"
+            android:textSize="22sp"
+            android:textColor="@color/brand_primary"
             android:letterSpacing="0.30"
-            android:text="ATENÇÃO, PACIENTE"
-            android:layout_marginBottom="8dp" />
+            android:text="ATENÇÃO PACIENTE" />
 
         <TextView
             android:id="@+id/call_name"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:fontFamily="sans-serif-black"
-            android:textSize="60sp"
-            android:textColor="@color/overlay_text_primary"
-            android:gravity="center"
-            android:text="—"
-            android:singleLine="true"
-            android:ellipsize="end"
-            android:layout_marginBottom="6dp" />
+            android:textSize="80sp"
+            android:textColor="@color/text_primary"
+            android:layout_marginTop="20dp"
+            android:lineSpacingMultiplier="0.95"
+            android:text="—" />
+
+        <View
+            android:layout_width="80dp"
+            android:layout_height="3dp"
+            android:layout_marginTop="28dp"
+            android:layout_marginBottom="20dp"
+            android:background="@drawable/divider_accent" />
 
         <TextView
             android:id="@+id/call_room"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:fontFamily="sans-serif"
-            android:textSize="34sp"
-            android:textColor="@color/overlay_text_secondary"
-            android:gravity="center"
+            android:fontFamily="sans-serif-medium"
+            android:textSize="44sp"
+            android:textColor="@color/brand_primary"
             android:text="—" />
     </LinearLayout>
 
