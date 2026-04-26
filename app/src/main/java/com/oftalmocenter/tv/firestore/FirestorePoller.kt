@@ -74,14 +74,17 @@ class FirestorePoller(
 
     private suspend fun pollOnce() {
         try {
-            fetchDocument("config/main")?.let { doc ->
-                val videoId = doc.fieldString("videoId")?.takeIf { it.isNotBlank() }
-                if (videoId != lastVideoId) {
-                    Log.i(TAG, "config/main.videoId: $lastVideoId → $videoId")
-                    lastVideoId = videoId
-                    withContext(Dispatchers.Main) { onVideoIdChanged(videoId) }
-                }
+            // Fonte do vídeo: coleção `ytPlaylist`. Pega o doc de menor `order`
+            // com URL/videoId válido. Carrossel entre múltiplos itens é Fase 5+.
+            // Fallback: se a coleção estiver vazia, tenta `config/main.videoId`
+            // (esquema antigo) — defensivo, hoje não é mais usado.
+            val videoId = pickVideoIdFromPlaylist() ?: pickVideoIdFromConfigMain()
+            if (videoId != lastVideoId) {
+                Log.i(TAG, "videoId: $lastVideoId → $videoId")
+                lastVideoId = videoId
+                withContext(Dispatchers.Main) { onVideoIdChanged(videoId) }
             }
+
             fetchDocument("config/control")?.let { doc ->
                 val volume = (doc.fieldInt("ytVolume") ?: DEFAULT_VOLUME).coerceIn(0, 100)
                 if (volume != lastVolume) {
@@ -93,6 +96,26 @@ class FirestorePoller(
         } catch (t: Throwable) {
             Log.w(TAG, "erro no poll: ${t.message}")
         }
+    }
+
+    private fun pickVideoIdFromPlaylist(): String? {
+        val collection = fetchDocument("ytPlaylist") ?: return null
+        val docs = collection.optJSONArray("documents") ?: return null
+
+        // Ordenar por campo `order` (asc); pegar o primeiro com videoId válido.
+        return (0 until docs.length())
+            .map { docs.getJSONObject(it) }
+            .sortedBy { it.fieldInt("order") ?: Int.MAX_VALUE }
+            .firstNotNullOfOrNull { doc ->
+                doc.fieldString("videoId")?.takeIf { it.isNotBlank() }
+                    ?: doc.fieldString("url")?.let { extractYoutubeVideoId(it) }
+            }
+    }
+
+    private fun pickVideoIdFromConfigMain(): String? {
+        return fetchDocument("config/main")
+            ?.fieldString("videoId")
+            ?.takeIf { it.isNotBlank() }
     }
 
     private fun fetchDocument(path: String): JSONObject? {
@@ -123,4 +146,20 @@ private fun JSONObject.fieldInt(name: String): Int? {
     if (field.has("integerValue")) return field.optString("integerValue").toIntOrNull()
     if (field.has("doubleValue")) return field.optDouble("doubleValue").toInt()
     return null
+}
+
+private val YT_ID_REGEX = Regex(
+    // Ordem importa: a primeira correspondência válida vence.
+    """(?:v=|youtu\.be/|/embed/|/shorts/|/v/)([A-Za-z0-9_-]{6,})"""
+)
+
+/**
+ * Extrai o videoId de uma URL do YouTube. Suporta os formatos comuns:
+ *   https://www.youtube.com/watch?v=ID&t=11s
+ *   https://youtu.be/ID
+ *   https://www.youtube.com/embed/ID
+ *   https://www.youtube.com/shorts/ID
+ */
+private fun extractYoutubeVideoId(url: String): String? {
+    return YT_ID_REGEX.find(url)?.groupValues?.getOrNull(1)?.takeIf { it.isNotBlank() }
 }
