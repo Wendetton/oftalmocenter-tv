@@ -15,6 +15,8 @@ import com.oftalmocenter.tv.audio.AudioOrchestrator
 import com.oftalmocenter.tv.audio.TTSManager
 import com.oftalmocenter.tv.cache.CacheManager
 import com.oftalmocenter.tv.firestore.FirestorePoller
+import com.oftalmocenter.tv.monitoring.CrashHandler
+import com.oftalmocenter.tv.monitoring.HeartbeatService
 import com.oftalmocenter.tv.player.StreamSource
 import com.oftalmocenter.tv.player.VideoPlayerManager
 import com.oftalmocenter.tv.player.YouTubeExtractor
@@ -65,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var callOverlay: PatientCallOverlay
     private lateinit var ttsManager: TTSManager
     private lateinit var audioOrchestrator: AudioOrchestrator
+    private lateinit var heartbeat: HeartbeatService
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var currentJob: Job? = null
@@ -76,6 +79,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Capturar exceções não tratadas e reagendar restart automático.
+        // Instalar o mais cedo possível para cobrir o resto do onCreate.
+        Thread.setDefaultUncaughtExceptionHandler(CrashHandler(applicationContext))
 
         applyFullscreenFlags()
         acquireWakeLock()
@@ -151,6 +158,18 @@ class MainActivity : AppCompatActivity() {
             }
         )
         firestorePoller.start()
+
+        // 3) Heartbeat — escreve status no Firestore a cada 5min para
+        //    permitir monitoramento remoto. Falha em silêncio se as
+        //    Security Rules não permitirem write.
+        heartbeat = HeartbeatService(
+            context = applicationContext,
+            projectId = FIRESTORE_PROJECT_ID,
+            apiKey = FIRESTORE_API_KEY,
+            getCurrentVideoId = { loadedVideoId },
+            getIsPlaying = { videoPlayerManager.player.isPlaying }
+        )
+        heartbeat.start()
     }
 
     override fun onResume() {
@@ -167,6 +186,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        heartbeat.stop()
         firestorePoller.stop()
         audioOrchestrator.stop()
         ttsManager.release()
