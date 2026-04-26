@@ -68,10 +68,13 @@ class PatientCallOverlay(
     }
 
     init {
-        // Ajusta a altura da faixa inferior para 12% da altura da tela.
-        val targetHeightPx = (displayMetrics.heightPixels * 0.12f).toInt()
+        // Ajusta a altura da faixa inferior para 18% da altura da tela.
+        // Cálculo: em densidade típica de Fire TV (213-240 dpi reportado),
+        // a tela DP fica em ~480-540dp de altura. 18% dá ~86-97dp, espaço
+        // suficiente para header (15sp) + 3 rows (15sp) sem clipping.
+        val targetHeightPx = (displayMetrics.heightPixels * 0.18f).toInt()
         bottomBar.layoutParams = bottomBar.layoutParams.apply { height = targetHeightPx }
-        Log.i(TAG, "bottom_bar height ajustada para ${targetHeightPx}px (12% de ${displayMetrics.heightPixels}px)")
+        Log.i(TAG, "bottom_bar height ajustada para ${targetHeightPx}px (18% de ${displayMetrics.heightPixels}px)")
     }
 
     fun start() {
