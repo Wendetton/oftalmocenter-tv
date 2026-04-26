@@ -1,7 +1,6 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
-    id 'com.google.gms.google-services'
 }
 
 android {
@@ -86,23 +85,11 @@ dependencies {
     // NewPipe Extractor — extrai stream URL direto do YouTube (sem WebView).
     implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.1'
 
-    // OkHttp — usado pela nossa implementação de Downloader do NewPipe.
+    // OkHttp — Downloader do NewPipe + cliente REST do Firestore.
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
-    // Firebase Firestore (sem autenticação — as Security Rules do projeto
-    // webtv-ee904 são abertas para os paths usados, igual ao app web).
-    // Excluímos `protolite-well-known-types`: ele se sobrepõe ao
-    // `protobuf-javalite` moderno (mesmas classes DescriptorProtos*),
-    // causando "checkDuplicateClasses". O javalite cobre tudo que o
-    // protolite expõe.
-    implementation platform('com.google.firebase:firebase-bom:33.7.0')
-    implementation('com.google.firebase:firebase-firestore-ktx') {
-        exclude group: 'com.google.firebase', module: 'protolite-well-known-types'
-    }
-
-    // Coroutines (usado pelo VideoPlayerManager e fases futuras)
+    // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
-    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
 
     // Variante "_nio" do desugar_jdk_libs: cobre java.time + java.nio +
     // java.net.URLDecoder.decode(String, Charset) usado pelo NewPipe.

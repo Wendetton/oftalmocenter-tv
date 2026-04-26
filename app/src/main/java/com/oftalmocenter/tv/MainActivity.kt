@@ -12,7 +12,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
 import com.oftalmocenter.tv.cache.CacheManager
-import com.oftalmocenter.tv.firestore.FirestoreService
+import com.oftalmocenter.tv.firestore.FirestorePoller
 import com.oftalmocenter.tv.player.StreamSource
 import com.oftalmocenter.tv.player.VideoPlayerManager
 import com.oftalmocenter.tv.player.YouTubeExtractor
@@ -39,6 +39,12 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
 
+        // Projeto Firestore consumido (mesmo do app web). API key fica no APK
+        // — sem valor de segurança, o controle de acesso vive nas Security
+        // Rules do Firestore.
+        private const val FIRESTORE_PROJECT_ID = "webtv-ee904"
+        private const val FIRESTORE_API_KEY = "AIzaSyB-04iQ91vSQjZJaRAxyCX2Fcq-vDGHa0o"
+
         // Re-extração preventiva: streams do YouTube costumam expirar entre 4-6h;
         // 3h dá uma boa margem para refresh transparente antes do 403.
         private const val REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000L
@@ -52,7 +58,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var playerView: PlayerView
     private lateinit var videoPlayerManager: VideoPlayerManager
     private lateinit var cache: CacheManager
-    private lateinit var firestoreService: FirestoreService
+    private lateinit var firestorePoller: FirestorePoller
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var currentJob: Job? = null
@@ -90,16 +96,19 @@ class MainActivity : AppCompatActivity() {
             Log.i(TAG, "sem cache; aguardando Firestore")
         }
 
-        // 2) Firestore listeners (atualizam quando admin mexer no painel web).
-        firestoreService = FirestoreService(
+        // 2) Firestore poller via REST. Polling de 10s — admin troca vídeo
+        //    e o app pega na próxima rodada. Sem SDK Firebase, sem gRPC.
+        firestorePoller = FirestorePoller(
+            projectId = FIRESTORE_PROJECT_ID,
+            apiKey = FIRESTORE_API_KEY,
             onVideoIdChanged = { videoId ->
                 if (videoId.isNullOrBlank()) {
                     Log.w(TAG, "videoId vazio recebido do Firestore — ignorando")
-                    return@FirestoreService
+                    return@FirestorePoller
                 }
                 if (videoId == loadedVideoId) {
                     Log.i(TAG, "videoId inalterado ($videoId) — sem reload")
-                    return@FirestoreService
+                    return@FirestorePoller
                 }
                 cache.saveVideoId(videoId)
                 loadVideoId(videoId)
@@ -109,7 +118,7 @@ class MainActivity : AppCompatActivity() {
                 videoPlayerManager.setVolume(percent)
             }
         )
-        firestoreService.start()
+        firestorePoller.start()
     }
 
     override fun onResume() {
@@ -126,7 +135,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        firestoreService.stop()
+        firestorePoller.stop()
         currentJob?.cancel()
         refreshJob?.cancel()
         playerView.player = null
