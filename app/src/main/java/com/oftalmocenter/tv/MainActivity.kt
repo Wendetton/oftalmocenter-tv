@@ -16,6 +16,7 @@ import com.oftalmocenter.tv.firestore.FirestorePoller
 import com.oftalmocenter.tv.player.StreamSource
 import com.oftalmocenter.tv.player.VideoPlayerManager
 import com.oftalmocenter.tv.player.YouTubeExtractor
+import com.oftalmocenter.tv.ui.PatientCallOverlay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -59,6 +60,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var videoPlayerManager: VideoPlayerManager
     private lateinit var cache: CacheManager
     private lateinit var firestorePoller: FirestorePoller
+    private lateinit var callOverlay: PatientCallOverlay
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var currentJob: Job? = null
@@ -76,6 +78,9 @@ class MainActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_main)
         playerView = findViewById(R.id.player_view)
+
+        callOverlay = PatientCallOverlay(findViewById(R.id.root_container))
+        callOverlay.start()
 
         cache = CacheManager(this)
         videoPlayerManager = VideoPlayerManager(this)
@@ -96,8 +101,8 @@ class MainActivity : AppCompatActivity() {
             Log.i(TAG, "sem cache; aguardando Firestore")
         }
 
-        // 2) Firestore poller via REST. Polling de 10s — admin troca vídeo
-        //    e o app pega na próxima rodada. Sem SDK Firebase, sem gRPC.
+        // 2) Firestore poller via REST. Polling 10s para vídeo/volume e 1s
+        //    para chamadas (config/announce). Sem SDK Firebase, sem gRPC.
         firestorePoller = FirestorePoller(
             projectId = FIRESTORE_PROJECT_ID,
             apiKey = FIRESTORE_API_KEY,
@@ -116,6 +121,9 @@ class MainActivity : AppCompatActivity() {
             onVolumeChanged = { percent ->
                 cache.saveVolume(percent)
                 videoPlayerManager.setVolume(percent)
+            },
+            onCallStateChanged = { idle, nome, sala ->
+                callOverlay.applyState(idle, nome, sala)
             }
         )
         firestorePoller.start()
@@ -136,6 +144,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         firestorePoller.stop()
+        callOverlay.stop()
         currentJob?.cancel()
         refreshJob?.cancel()
         playerView.player = null
@@ -144,13 +153,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // Tecla BACK: alterna entre simular uma chamada de teste e esconder.
+        // Útil para validar a UI da chamada sem precisar do admin web.
+        // Será substituída pela lógica de TTS na Fase 5.
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            Log.i(TAG, "BACK pressed → re-extrair vídeo atual")
-            loadedVideoId?.let { loadVideoId(it) }
+            if (testCallShowing) {
+                Log.i(TAG, "BACK pressed → esconder chamada de teste")
+                callOverlay.hideCall()
+            } else {
+                Log.i(TAG, "BACK pressed → mostrar chamada de teste")
+                callOverlay.showCall("FERNANDO AZEVEDO", "Consultório 2")
+            }
+            testCallShowing = !testCallShowing
             return true
         }
         return super.onKeyDown(keyCode, event)
     }
+
+    private var testCallShowing = false
 
     /**
      * Extrai o `videoId` do YouTube e reproduz. Cancela qualquer extração

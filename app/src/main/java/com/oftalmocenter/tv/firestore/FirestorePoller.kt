@@ -34,12 +34,14 @@ class FirestorePoller(
     private val projectId: String,
     private val apiKey: String,
     private val onVideoIdChanged: (String?) -> Unit,
-    private val onVolumeChanged: (Int) -> Unit
+    private val onVolumeChanged: (Int) -> Unit,
+    private val onCallStateChanged: (idle: Boolean, nome: String?, sala: String?) -> Unit
 ) {
 
     companion object {
         private const val TAG = "FirestorePoller"
-        private const val POLL_INTERVAL_MS = 10_000L
+        private const val CONFIG_POLL_INTERVAL_MS = 10_000L
+        private const val ANNOUNCE_POLL_INTERVAL_MS = 1_000L
         private const val DEFAULT_VOLUME = 50
     }
 
@@ -50,29 +52,41 @@ class FirestorePoller(
         .build()
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var pollJob: Job? = null
+    private var configJob: Job? = null
+    private var announceJob: Job? = null
 
     private var lastVideoId: String? = null
     private var lastVolume: Int? = null
+    private var lastAnnounceNonce: String? = null
 
     fun start() {
-        if (pollJob?.isActive == true) return
-        Log.i(TAG, "iniciando polling a cada ${POLL_INTERVAL_MS}ms")
-        pollJob = scope.launch {
-            while (isActive) {
-                pollOnce()
-                delay(POLL_INTERVAL_MS)
+        if (configJob == null || configJob?.isActive == false) {
+            Log.i(TAG, "iniciando polling de config (${CONFIG_POLL_INTERVAL_MS}ms)")
+            configJob = scope.launch {
+                while (isActive) {
+                    pollConfigOnce()
+                    delay(CONFIG_POLL_INTERVAL_MS)
+                }
+            }
+        }
+        if (announceJob == null || announceJob?.isActive == false) {
+            Log.i(TAG, "iniciando polling de announce (${ANNOUNCE_POLL_INTERVAL_MS}ms)")
+            announceJob = scope.launch {
+                while (isActive) {
+                    pollAnnounceOnce()
+                    delay(ANNOUNCE_POLL_INTERVAL_MS)
+                }
             }
         }
     }
 
     fun stop() {
         Log.i(TAG, "parando polling")
-        pollJob?.cancel()
-        pollJob = null
+        configJob?.cancel(); configJob = null
+        announceJob?.cancel(); announceJob = null
     }
 
-    private suspend fun pollOnce() {
+    private suspend fun pollConfigOnce() {
         try {
             // Fonte do vídeo: coleção `ytPlaylist`. Pega o doc de menor `order`
             // com URL/videoId válido. Carrossel entre múltiplos itens é Fase 5+.
@@ -95,6 +109,36 @@ class FirestorePoller(
             }
         } catch (t: Throwable) {
             Log.w(TAG, "erro no poll: ${t.message}")
+        }
+    }
+
+    /**
+     * Pega o estado de chamada do `config/announce`. Dispara o callback
+     * sempre que o `nonce` muda (nova chamada) E quando volta a `idle=true`
+     * — esse último caso garante que o overlay seja escondido no fim.
+     */
+    private suspend fun pollAnnounceOnce() {
+        try {
+            val doc = fetchDocument("config/announce") ?: return
+            val nonce = doc.fieldString("nonce") ?: return
+
+            // Disparar quando o nonce muda OU quando o estado idle pode ter
+            // mudado mesmo com mesmo nonce (raro, mas defensivo: o admin web
+            // pode setar idle=true mantendo o nonce).
+            val idle = doc.fieldBoolean("idle") ?: true
+            val nome = doc.fieldString("nome")?.takeIf { it.isNotBlank() }
+            val sala = doc.fieldString("sala")?.takeIf { it.isNotBlank() }
+
+            val nonceChanged = nonce != lastAnnounceNonce
+            if (!nonceChanged && idle) {
+                // Estado já está idle desde a última checagem; nada mudou.
+                return
+            }
+            lastAnnounceNonce = nonce
+            Log.i(TAG, "announce: nonce=$nonce idle=$idle nome=$nome sala=$sala")
+            withContext(Dispatchers.Main) { onCallStateChanged(idle, nome, sala) }
+        } catch (t: Throwable) {
+            Log.w(TAG, "erro no pollAnnounce: ${t.message}")
         }
     }
 
@@ -145,6 +189,13 @@ private fun JSONObject.fieldInt(name: String): Int? {
     val field = optJSONObject("fields")?.optJSONObject(name) ?: return null
     if (field.has("integerValue")) return field.optString("integerValue").toIntOrNull()
     if (field.has("doubleValue")) return field.optDouble("doubleValue").toInt()
+    return null
+}
+
+/** Lê `fields.<name>.booleanValue` do JSON do Firestore REST. */
+private fun JSONObject.fieldBoolean(name: String): Boolean? {
+    val field = optJSONObject("fields")?.optJSONObject(name) ?: return null
+    if (field.has("booleanValue")) return field.optBoolean("booleanValue")
     return null
 }
 
