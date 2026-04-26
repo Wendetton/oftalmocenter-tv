@@ -106,6 +106,10 @@ class HeartbeatService(
                         Log.w(TAG, "→ Security Rules do Firestore não permitem PATCH em $DOC_PATH; ajuste as regras se quiser monitor remoto.")
                     }
                 }
+                // Força o tipo do lambda a Unit — sem isso o último `if` sem
+                // `else` faz o compilador tentar inferir Unit-como-expressão,
+                // o que não é permitido em Kotlin.
+                Unit
             }
         } catch (t: Throwable) {
             Log.w(TAG, "heartbeat erro: ${t.javaClass.simpleName}: ${t.message}")
