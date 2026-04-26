@@ -1,6 +1,7 @@
 package com.oftalmocenter.tv.firestore
 
 import android.util.Log
+import com.oftalmocenter.tv.cache.CallHistoryStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -9,9 +10,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 /**
@@ -49,14 +54,17 @@ class FirestorePoller(
     private val onVideoIdChanged: (String?) -> Unit,
     private val onVolumeChanged: (Int) -> Unit,
     private val onCallStateChanged: (idle: Boolean, nome: String?, sala: String?) -> Unit,
-    private val onAudioConfigChanged: (AudioConfig) -> Unit
+    private val onAudioConfigChanged: (AudioConfig) -> Unit,
+    private val onCallHistoryChanged: (List<CallHistoryStore.Entry>) -> Unit
 ) {
 
     companion object {
         private const val TAG = "FirestorePoller"
         private const val CONFIG_POLL_INTERVAL_MS = 10_000L
         private const val ANNOUNCE_POLL_INTERVAL_MS = 1_000L
+        private const val CALLS_POLL_INTERVAL_MS = 30_000L
         private const val DEFAULT_VOLUME = 50
+        private val JSON_MIME = "application/json; charset=utf-8".toMediaType()
     }
 
     private val client = OkHttpClient.Builder()
@@ -68,12 +76,16 @@ class FirestorePoller(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var configJob: Job? = null
     private var announceJob: Job? = null
+    private var callsJob: Job? = null
 
     private var lastVideoId: String? = null
     private var lastVolume: Int? = null
     private var lastAnnounceNonce: String? = null
     private var lastAnnounceIdle: Boolean = true
     private var lastAudioConfig: AudioConfig? = null
+    /** null = nunca sincronizou; garante que o primeiro poll sempre dispare
+     *  o callback (até para coleção vazia, que é o caso da limpeza). */
+    private var lastCallsSignature: String? = null
 
     fun start() {
         if (configJob == null || configJob?.isActive == false) {
@@ -94,12 +106,24 @@ class FirestorePoller(
                 }
             }
         }
+        if (callsJob == null || callsJob?.isActive == false) {
+            Log.i(TAG, "iniciando polling de calls (${CALLS_POLL_INTERVAL_MS}ms)")
+            callsJob = scope.launch {
+                // Primeiro batimento imediato — sincroniza histórico ao subir.
+                pollCallsOnce()
+                while (isActive) {
+                    delay(CALLS_POLL_INTERVAL_MS)
+                    pollCallsOnce()
+                }
+            }
+        }
     }
 
     fun stop() {
         Log.i(TAG, "parando polling")
         configJob?.cancel(); configJob = null
         announceJob?.cancel(); announceJob = null
+        callsJob?.cancel(); callsJob = null
     }
 
     private suspend fun pollConfigOnce() {
@@ -182,6 +206,96 @@ class FirestorePoller(
             withContext(Dispatchers.Main) { onCallStateChanged(idle, nome, sala) }
         } catch (t: Throwable) {
             Log.w(TAG, "erro no pollAnnounce: ${t.message}")
+        }
+    }
+
+    /**
+     * Sincroniza o histórico local com a coleção `calls` do Firestore.
+     * Lê via `runQuery` REST com orderBy timestamp DESC, limit 6, e
+     * filtra `test == true` (mesma lógica do app web /tv.js).
+     *
+     * Quando o admin limpa o histórico no painel /admin (deleta docs
+     * de `calls`), o próximo poll vai vir vazio — a TV reflete a
+     * limpeza automaticamente.
+     *
+     * Só dispara o callback quando o conjunto muda (assinatura).
+     */
+    private suspend fun pollCallsOnce() {
+        try {
+            val docs = runQueryCalls() ?: return
+            val entries = docs.mapNotNull { parseCallDocument(it) }
+                .filter { !it.isTest }
+                .take(3)
+                .map { CallHistoryStore.Entry(it.nome, it.sala, it.timestampMs) }
+
+            val signature = entries.joinToString("|") { "${it.nome}/${it.sala}/${it.timestampMs}" }
+            if (signature == lastCallsSignature) {
+                return
+            }
+            lastCallsSignature = signature
+            Log.i(TAG, "calls sync: ${entries.size} entries — ${entries.joinToString { "${it.nome}/${it.sala}" }}")
+            withContext(Dispatchers.Main) { onCallHistoryChanged(entries) }
+        } catch (t: Throwable) {
+            Log.w(TAG, "erro no pollCalls: ${t.message}")
+        }
+    }
+
+    private data class RawCall(
+        val nome: String,
+        val sala: String,
+        val timestampMs: Long,
+        val isTest: Boolean
+    )
+
+    private fun parseCallDocument(doc: JSONObject): RawCall? {
+        val fields = doc.optJSONObject("fields") ?: return null
+        val nome = fields.optJSONObject("nome")?.optString("stringValue", null)?.trim()
+        val sala = fields.optJSONObject("sala")?.optString("stringValue", null)?.trim()
+        if (nome.isNullOrBlank() || sala.isNullOrBlank()) return null
+
+        val tsString = fields.optJSONObject("timestamp")?.optString("timestampValue", null)
+        val tsMs = tsString?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
+            ?: 0L
+        val isTest = fields.optJSONObject("test")?.optBoolean("booleanValue", false) ?: false
+        return RawCall(nome, sala, tsMs, isTest)
+    }
+
+    /**
+     * Executa runQuery REST contra `calls` (orderBy timestamp DESC,
+     * limit 6). Retorna a lista de documents (não o envelope completo).
+     */
+    private fun runQueryCalls(): List<JSONObject>? {
+        val url = "https://firestore.googleapis.com/v1/projects/$projectId/" +
+            "databases/(default)/documents:runQuery?key=$apiKey"
+        val body = """
+            {
+              "structuredQuery": {
+                "from": [{"collectionId": "calls"}],
+                "orderBy": [{
+                  "field": {"fieldPath": "timestamp"},
+                  "direction": "DESCENDING"
+                }],
+                "limit": 6
+              }
+            }
+        """.trimIndent()
+
+        val request = Request.Builder()
+            .url(url)
+            .post(body.toRequestBody(JSON_MIME))
+            .build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                Log.w(TAG, "calls runQuery → HTTP ${response.code}")
+                return null
+            }
+            val raw = response.body?.string() ?: return null
+            // runQuery retorna um JSON array; cada item pode ter {document: ...}
+            // ou só {readTime: ...} (resposta vazia). Filtrar.
+            val arr = JSONArray(raw)
+            return (0 until arr.length()).mapNotNull { i ->
+                arr.getJSONObject(i).optJSONObject("document")
+            }
         }
     }
 

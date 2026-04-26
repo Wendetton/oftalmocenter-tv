@@ -41,45 +41,61 @@ object YouTubeExtractor {
         val info: StreamInfo = StreamInfo.getInfo(service, youtubeUrl)
         Log.i(TAG, "  título: '${info.name}'  duração: ${info.duration}s")
 
-        // 1) Tentar progressivo mp4 (vídeo+áudio juntos).
-        val progressives = info.videoStreams
-            .filter { it.isVideoOnly().not() }
-            .filter { it.format?.mimeType?.contains("mp4", ignoreCase = true) == true }
-            .filter { it.content.isNotBlank() }
+        // Estratégia (atualizada para qualidade):
+        // O YouTube atualmente limita streams progressivos (vídeo+áudio
+        // juntos) a 360p. Para qualidade decente em TV, é necessário usar
+        // adaptive: vídeo-only mp4 (H.264) + áudio-only AAC, combinados
+        // pelo ExoPlayer via MergingMediaSource.
+        //
+        // Ordem de preferência:
+        //   1. Adaptive vídeo 720p mp4 + melhor áudio aac (ideal para
+        //      Fire TV Stick HD).
+        //   2. Adaptive vídeo 1080p mp4 (alta qualidade; downscale no
+        //      hardware, pequeno custo de banda extra).
+        //   3. Adaptive vídeo 480p mp4.
+        //   4. Adaptive vídeo 360p mp4 (último recurso adaptive).
+        //   5. Progressivo mp4 (qualquer resolução, fallback final).
 
-        val progressivePref = pickByResolution(progressives, listOf("480p", "360p", "720p", "240p"))
-        if (progressivePref != null) {
-            Log.i(TAG, "  → progressivo ${progressivePref.resolution} mp4")
-            return@withContext StreamSource(
-                videoUrl = progressivePref.content,
-                audioUrl = null,
-                title = info.name ?: "",
-                durationSeconds = info.duration,
-                resolution = progressivePref.resolution ?: "?"
-            )
-        }
-
-        // 2) Fallback adaptive: vídeo-only mp4 (h264) + áudio-only m4a.
         val videoOnly = info.videoOnlyStreams
             .filter { it.format?.mimeType?.contains("mp4", ignoreCase = true) == true }
             .filter { it.content.isNotBlank() }
-        val videoPref = pickByResolution(videoOnly, listOf("720p", "480p", "360p", "1080p"))
-            ?: error("Nenhum stream de vídeo (mp4) disponível para $youtubeUrl")
 
         val audioPref = info.audioStreams
             .filter { it.format?.mimeType?.contains("mp4", ignoreCase = true) == true ||
                       it.format?.mimeType?.contains("audio", ignoreCase = true) == true }
             .filter { it.content.isNotBlank() }
             .maxByOrNull { it.averageBitrate }
-            ?: error("Nenhum stream de áudio disponível para $youtubeUrl")
 
-        Log.i(TAG, "  → adaptive vídeo ${videoPref.resolution} + áudio ${audioPref.averageBitrate}bps")
+        val videoPref = pickByResolution(videoOnly, listOf("720p", "1080p", "480p", "360p"))
+        if (videoPref != null && audioPref != null) {
+            Log.i(
+                TAG,
+                "  → adaptive vídeo ${videoPref.resolution} mp4 + áudio ${audioPref.averageBitrate}bps"
+            )
+            return@withContext StreamSource(
+                videoUrl = videoPref.content,
+                audioUrl = audioPref.content,
+                title = info.name ?: "",
+                durationSeconds = info.duration,
+                resolution = videoPref.resolution ?: "?"
+            )
+        }
+
+        // Fallback: progressivo mp4 (vídeo+áudio juntos) — provavelmente 360p.
+        val progressives = info.videoStreams
+            .filter { it.isVideoOnly().not() }
+            .filter { it.format?.mimeType?.contains("mp4", ignoreCase = true) == true }
+            .filter { it.content.isNotBlank() }
+        val progressivePref = pickByResolution(progressives, listOf("720p", "480p", "360p", "240p"))
+            ?: error("Nenhum stream de vídeo disponível para $youtubeUrl")
+
+        Log.w(TAG, "  → fallback progressivo ${progressivePref.resolution} mp4 (adaptive falhou)")
         StreamSource(
-            videoUrl = videoPref.content,
-            audioUrl = audioPref.content,
+            videoUrl = progressivePref.content,
+            audioUrl = null,
             title = info.name ?: "",
             durationSeconds = info.duration,
-            resolution = videoPref.resolution ?: "?"
+            resolution = progressivePref.resolution ?: "?"
         )
     }
 

@@ -65,6 +65,16 @@ class CallHistoryStore(context: Context) {
         return load().filter { now - it.timestampMs <= MAX_AGE_MS }.take(MAX_SIZE)
     }
 
+    /**
+     * Substitui completamente o conteúdo do histórico pelo passado.
+     * Usado quando o app sincroniza com o estado remoto da coleção
+     * `calls` do Firestore — fonte de verdade que pode ter sido limpa
+     * pelo admin no painel web.
+     */
+    fun replaceAll(entries: List<Entry>) {
+        save(entries.take(MAX_SIZE))
+    }
+
     fun clear() {
         prefs.edit().remove(KEY_ENTRIES).apply()
     }

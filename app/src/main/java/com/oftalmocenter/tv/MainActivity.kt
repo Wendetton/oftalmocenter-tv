@@ -162,6 +162,13 @@ class MainActivity : AppCompatActivity() {
                 audioOrchestrator.template = cfg.template
                 // Se não há slider ytVolume definido, usa restoreVolume como
                 // base. Se houver, ytVolume já foi aplicado em onVolumeChanged.
+            },
+            onCallHistoryChanged = { entries ->
+                // Sincronização com a coleção `calls` do Firestore — fonte
+                // de verdade. Quando o admin limpa no painel /admin, vem
+                // lista vazia e o histórico local é zerado também.
+                historyStore.replaceAll(entries)
+                callOverlay.refreshHistory()
             }
         )
         firestorePoller.start()

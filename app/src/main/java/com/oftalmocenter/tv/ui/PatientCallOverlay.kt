@@ -82,6 +82,11 @@ class PatientCallOverlay(
         mainHandler.postDelayed(refreshHistoryTick, 60_000L)
     }
 
+    /** Força re-render da faixa de histórico (após sync com Firestore). */
+    fun refreshHistory() {
+        renderHistory()
+    }
+
     fun stop() {
         mainHandler.removeCallbacks(refreshHistoryTick)
         callCard.animate().cancel()
