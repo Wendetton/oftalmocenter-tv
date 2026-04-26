@@ -9,10 +9,25 @@ android {
 
     defaultConfig {
         applicationId "com.oftalmocenter.tv"
-        minSdk 22
+        // minSdk 23 alinhado com o app oficial NewPipe (devices abaixo são
+        // raríssimos em 2026 e o alvo é Fire TV Stick HD = API 28).
+        minSdk 23
         targetSdk 34
         versionCode 1
         versionName "1.0"
+    }
+
+    // Chave fixa de debug versionada no repositório.
+    // Mantém a mesma assinatura entre builds do CI, evitando o erro
+    // INSTALL_FAILED_UPDATE_INCOMPATIBLE ao reinstalar via `adb install -r`.
+    // É um keystore de debug — sem valor de segurança em produção.
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
     }
 
     buildTypes {
@@ -23,6 +38,11 @@ android {
     }
 
     compileOptions {
+        // NewPipe Extractor usa java.time/Optional/Stream e — crucial — chama
+        // URLDecoder.decode(String, Charset), que só existe nativamente em
+        // Android 13+. A variante "_nio" do desugar_jdk_libs é a que cobre
+        // essa API. É a mesma escolha do app oficial NewPipe.
+        coreLibraryDesugaringEnabled true
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
@@ -30,9 +50,49 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
+
+    packagingOptions {
+        // NewPipe Extractor traz vários META-INF de licenças.
+        resources {
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/license.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt',
+                'META-INF/notice.txt',
+                'META-INF/ASL2.0',
+                'META-INF/*.kotlin_module'
+            ]
+        }
+    }
 }
 
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+
+    // Media3 / ExoPlayer — reprodução de vídeo via hardware decoder
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-hls:1.4.1'
+    implementation 'androidx.media3:media3-exoplayer-dash:1.4.1'
+    implementation 'androidx.media3:media3-datasource:1.4.1'
+    implementation 'androidx.media3:media3-common:1.4.1'
+
+    // NewPipe Extractor — extrai stream URL direto do YouTube (sem WebView).
+    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.1'
+
+    // OkHttp — Downloader do NewPipe + cliente REST do Firestore.
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
+    // Coroutines
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // Variante "_nio" do desugar_jdk_libs: cobre java.time + java.nio +
+    // java.net.URLDecoder.decode(String, Charset) usado pelo NewPipe.
+    // Versão e variante alinhadas com o app oficial NewPipe.
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs_nio:2.1.5'
 }

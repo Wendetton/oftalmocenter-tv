@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="overlay_bg_dim">#A0000000</color>
+    <color name="overlay_bg_solid">#E6080C12</color>
+    <color name="overlay_text_primary">#FFFFFFFF</color>
+    <color name="overlay_text_secondary">#FFFEFEFE</color>
+    <color name="overlay_accent">#FF5BB8D4</color>
+    <color name="overlay_muted">#CCFFFFFF</color>
+</resources>
