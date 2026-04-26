@@ -24,43 +24,9 @@ class VideoPlayerManager(private val context: Context) {
         private const val TAG = "VideoPlayerManager"
     }
 
-    val player: ExoPlayer = ExoPlayer.Builder(context).build().apply {
-        repeatMode = Player.REPEAT_MODE_ONE
-        playWhenReady = true
-        setAudioAttributes(
-            AudioAttributes.Builder()
-                .setUsage(C.USAGE_MEDIA)
-                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                .build(),
-            /* handleAudioFocus = */ true
-        )
-        addListener(playbackListener)
-        addAnalyticsListener(decoderListener)
-    }
-
-    fun playStream(url: String) {
-        Log.i(TAG, "playStream: $url")
-        val item = MediaItem.fromUri(url)
-        player.setMediaItem(item)
-        player.prepare()
-        player.playWhenReady = true
-    }
-
-    fun setVolume(percent: Int) {
-        val v = (percent.coerceIn(0, 100)) / 100f
-        player.volume = v
-    }
-
-    fun release() {
-        try {
-            player.removeListener(playbackListener)
-            player.removeAnalyticsListener(decoderListener)
-            player.release()
-        } catch (t: Throwable) {
-            Log.w(TAG, "release error: ${t.message}")
-        }
-    }
-
+    // Os listeners precisam ser inicializados ANTES da propriedade `player`
+    // porque o bloco `apply { addListener(...) }` é executado durante a
+    // construção e o Kotlin inicializa as propriedades na ordem do arquivo.
     private val playbackListener = object : Player.Listener {
         override fun onPlaybackStateChanged(state: Int) {
             val name = when (state) {
@@ -119,6 +85,43 @@ class VideoPlayerManager(private val context: Context) {
                 TAG,
                 "VIDEO format = ${format.sampleMimeType} ${format.width}x${format.height}@${format.frameRate}fps"
             )
+        }
+    }
+
+    val player: ExoPlayer = ExoPlayer.Builder(context).build().apply {
+        repeatMode = Player.REPEAT_MODE_ONE
+        playWhenReady = true
+        setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build(),
+            /* handleAudioFocus = */ true
+        )
+        addListener(playbackListener)
+        addAnalyticsListener(decoderListener)
+    }
+
+    fun playStream(url: String) {
+        Log.i(TAG, "playStream: $url")
+        val item = MediaItem.fromUri(url)
+        player.setMediaItem(item)
+        player.prepare()
+        player.playWhenReady = true
+    }
+
+    fun setVolume(percent: Int) {
+        val v = (percent.coerceIn(0, 100)) / 100f
+        player.volume = v
+    }
+
+    fun release() {
+        try {
+            player.removeListener(playbackListener)
+            player.removeAnalyticsListener(decoderListener)
+            player.release()
+        } catch (t: Throwable) {
+            Log.w(TAG, "release error: ${t.message}")
         }
     }
 }
