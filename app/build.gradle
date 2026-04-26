@@ -79,7 +79,15 @@ dependencies {
     implementation 'androidx.media3:media3-common:1.4.1'
 
     // NewPipe Extractor — extrai stream URL direto do YouTube (sem WebView).
-    implementation 'com.github.TeamNewPipe:NewPipeExtractor:v0.26.1'
+    // Excluímos o Jsoup transitivo: as versões 1.16+ usam
+    // URLDecoder.decode(String, Charset), que só existe nativamente em
+    // Android 13+ e não é coberto pelo desugar_jdk_libs. Travamos o Jsoup
+    // em 1.15.4 (jul/2022), última que usa apenas a API antiga
+    // URLDecoder.decode(String, String) suportada desde a API 1.
+    implementation('com.github.TeamNewPipe:NewPipeExtractor:v0.26.1') {
+        exclude group: 'org.jsoup', module: 'jsoup'
+    }
+    implementation 'org.jsoup:jsoup:1.15.4'
 
     // OkHttp — usado pela nossa implementação de Downloader do NewPipe.
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
