@@ -47,7 +47,8 @@ class AudioOrchestrator(
     }
 
     // Configuração ajustável em tempo real via setters thread-safe.
-    @Volatile var videoBaseVolume: Int = 50
+    // videoBaseVolume é privado para evitar clash JVM com setVideoBaseVolume().
+    @Volatile private var videoBaseVolume: Int = 50
     @Volatile var duckVolume: Int = 0
     @Volatile var ttsVolume: Int = 100
     @Volatile var leadMs: Long = 450L
