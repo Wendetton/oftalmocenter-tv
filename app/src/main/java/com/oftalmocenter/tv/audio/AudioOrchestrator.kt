@@ -38,7 +38,7 @@ class AudioOrchestrator(
 
     companion object {
         private const val TAG = "AudioOrchestrator"
-        private const val POST_CALL_HOLD_MS = 10_000L
+        private const val POST_CALL_HOLD_MS = 20_000L
         private const val DUCK_FADE_MS = 500L
         private const val RESTORE_FADE_MS = 1000L
         private const val TTS_TIMEOUT_MS = 15_000L

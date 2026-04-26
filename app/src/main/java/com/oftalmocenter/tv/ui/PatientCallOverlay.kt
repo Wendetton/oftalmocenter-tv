@@ -91,7 +91,7 @@ class PatientCallOverlay(
      */
     fun showCall(nome: String, sala: String) {
         val displayName = formatPatientName(nome)
-        val displayRoom = formatRoom(sala)
+        val displayRoom = formatRoomForCard(sala)
 
         historyStore.add(nome, sala)
         renderHistory()
@@ -101,6 +101,8 @@ class PatientCallOverlay(
         }
         callName.text = displayName
         callRoom.text = displayRoom
+
+        Log.i(TAG, "showCall: '$displayName' / '$displayRoom' (isShowing=$isShowing)")
 
         if (isShowing) {
             // Card já visível, novo paciente: troca direto sem fade extra.
@@ -155,6 +157,7 @@ class PatientCallOverlay(
 
     private fun renderHistory() {
         val items = historyStore.recent()
+        Log.i(TAG, "renderHistory: ${items.size} entries — ${items.joinToString { "${it.nome}/${it.sala}" }}")
         renderRow(historyRow1, historyName1, historyRoom1, items.getOrNull(0))
         renderRow(historyRow2, historyName2, historyRoom2, items.getOrNull(1))
         renderRow(historyRow3, historyName3, historyRoom3, items.getOrNull(2))
@@ -172,13 +175,24 @@ class PatientCallOverlay(
         }
         row.visibility = View.VISIBLE
         nameView.text = formatPatientName(entry.nome)
-        roomView.text = formatRoom(entry.sala).let { sala ->
-            // No histórico, prefixar "Cons." se a sala for um número simples.
-            if (sala.isBlank()) ""
-            else if (sala.toIntOrNull() != null) "Consultório $sala"
-            else sala
+        roomView.text = formatRoomForHistory(entry.sala)
+    }
+
+    /**
+     * Formata sala para o card central. "2" → "Consultório 2".
+     * Se a sala já vier com texto descritivo ("Sala 3", "Cons. 1"), preserva.
+     */
+    private fun formatRoomForCard(raw: String): String {
+        val trimmed = raw.trim()
+        return when {
+            trimmed.isEmpty() -> ""
+            trimmed.toIntOrNull() != null -> "Consultório $trimmed"
+            else -> trimmed.replaceFirstChar { it.titlecase(Locale("pt", "BR")) }
         }
     }
+
+    /** No histórico, mesmo formato compacto: "Consultório 2". */
+    private fun formatRoomForHistory(raw: String): String = formatRoomForCard(raw)
 
     /**
      * "JOÃO DA SILVA" → "João da Silva". Capitaliza primeira letra de
@@ -194,11 +208,5 @@ class PatientCallOverlay(
                 if (word.length <= 2 && small.contains(word)) word
                 else word.replaceFirstChar { it.titlecase(Locale("pt", "BR")) }
             }
-    }
-
-    private fun formatRoom(raw: String): String {
-        val trimmed = raw.trim()
-        return if (trimmed.isEmpty()) ""
-        else trimmed.replaceFirstChar { it.titlecase(Locale("pt", "BR")) }
     }
 }
