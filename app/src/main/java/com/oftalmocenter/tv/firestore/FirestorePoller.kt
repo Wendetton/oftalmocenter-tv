@@ -30,12 +30,26 @@ import java.util.concurrent.TimeUnit
  * e pages/_app.js do Wendetton/webtv): as Security Rules do projeto são
  * abertas para os paths consumidos pela TV.
  */
+/**
+ * Configuração de áudio lida de `config/main`. Espelha os campos que o
+ * app web define no admin. Todos com defaults seguros caso o documento
+ * esteja faltando algum campo.
+ */
+data class AudioConfig(
+    val duckVolume: Int = 0,
+    val restoreVolume: Int = 60,
+    val announceVolume: Int = 100,
+    val leadMs: Long = 450L,
+    val template: String = "Atenção: paciente {{nome}}. Dirija-se à sala {{salaTxt}}."
+)
+
 class FirestorePoller(
     private val projectId: String,
     private val apiKey: String,
     private val onVideoIdChanged: (String?) -> Unit,
     private val onVolumeChanged: (Int) -> Unit,
-    private val onCallStateChanged: (idle: Boolean, nome: String?, sala: String?) -> Unit
+    private val onCallStateChanged: (idle: Boolean, nome: String?, sala: String?) -> Unit,
+    private val onAudioConfigChanged: (AudioConfig) -> Unit
 ) {
 
     companion object {
@@ -58,6 +72,7 @@ class FirestorePoller(
     private var lastVideoId: String? = null
     private var lastVolume: Int? = null
     private var lastAnnounceNonce: String? = null
+    private var lastAudioConfig: AudioConfig? = null
 
     fun start() {
         if (configJob == null || configJob?.isActive == false) {
@@ -89,9 +104,8 @@ class FirestorePoller(
     private suspend fun pollConfigOnce() {
         try {
             // Fonte do vídeo: coleção `ytPlaylist`. Pega o doc de menor `order`
-            // com URL/videoId válido. Carrossel entre múltiplos itens é Fase 5+.
-            // Fallback: se a coleção estiver vazia, tenta `config/main.videoId`
-            // (esquema antigo) — defensivo, hoje não é mais usado.
+            // com URL/videoId válido. Carrossel entre múltiplos itens é fase
+            // futura. Fallback: `config/main.videoId` (esquema antigo).
             val videoId = pickVideoIdFromPlaylist() ?: pickVideoIdFromConfigMain()
             if (videoId != lastVideoId) {
                 Log.i(TAG, "videoId: $lastVideoId → $videoId")
@@ -99,12 +113,30 @@ class FirestorePoller(
                 withContext(Dispatchers.Main) { onVideoIdChanged(videoId) }
             }
 
+            // Volume do slider em tempo real (admin pode ajustar dinamicamente).
             fetchDocument("config/control")?.let { doc ->
                 val volume = (doc.fieldInt("ytVolume") ?: DEFAULT_VOLUME).coerceIn(0, 100)
                 if (volume != lastVolume) {
                     Log.i(TAG, "config/control.ytVolume: $lastVolume → $volume")
                     lastVolume = volume
                     withContext(Dispatchers.Main) { onVolumeChanged(volume) }
+                }
+            }
+
+            // Config de áudio (duck/restore/announce/leadMs/template).
+            fetchDocument("config/main")?.let { doc ->
+                val cfg = AudioConfig(
+                    duckVolume = (doc.fieldInt("duckVolume") ?: 0).coerceIn(0, 100),
+                    restoreVolume = (doc.fieldInt("restoreVolume") ?: 60).coerceIn(0, 100),
+                    announceVolume = (doc.fieldInt("announceVolume") ?: 100).coerceIn(0, 100),
+                    leadMs = (doc.fieldInt("leadMs") ?: 450).coerceIn(0, 5000).toLong(),
+                    template = doc.fieldString("announceTemplate")?.takeIf { it.isNotBlank() }
+                        ?: "Atenção: paciente {{nome}}. Dirija-se à sala {{salaTxt}}."
+                )
+                if (cfg != lastAudioConfig) {
+                    Log.i(TAG, "config/main áudio: $cfg")
+                    lastAudioConfig = cfg
+                    withContext(Dispatchers.Main) { onAudioConfigChanged(cfg) }
                 }
             }
         } catch (t: Throwable) {

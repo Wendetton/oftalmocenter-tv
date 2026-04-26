@@ -11,6 +11,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import com.oftalmocenter.tv.audio.AudioOrchestrator
+import com.oftalmocenter.tv.audio.TTSManager
 import com.oftalmocenter.tv.cache.CacheManager
 import com.oftalmocenter.tv.firestore.FirestorePoller
 import com.oftalmocenter.tv.player.StreamSource
@@ -61,6 +63,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var cache: CacheManager
     private lateinit var firestorePoller: FirestorePoller
     private lateinit var callOverlay: PatientCallOverlay
+    private lateinit var ttsManager: TTSManager
+    private lateinit var audioOrchestrator: AudioOrchestrator
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var currentJob: Job? = null
@@ -91,18 +95,25 @@ class MainActivity : AppCompatActivity() {
         playerView.player = videoPlayerManager.player
         playerView.useController = false
 
-        // 1) Estado inicial vindo do cache (resposta imediata, antes do Firestore).
-        cache.loadVideoId()?.let { cachedId ->
-            Log.i(TAG, "cache → videoId = $cachedId")
-            videoPlayerManager.setVolume(cache.loadVolume())
-            loadVideoId(cachedId)
-        } ?: run {
-            videoPlayerManager.setVolume(cache.loadVolume())
-            Log.i(TAG, "sem cache; aguardando Firestore")
-        }
+        ttsManager = TTSManager(this)
+        audioOrchestrator = AudioOrchestrator(
+            player = videoPlayerManager,
+            tts = ttsManager,
+            onCallStarted = { nome, sala -> callOverlay.showCall(nome, sala) },
+            onCallEnded = { callOverlay.hideCall() }
+        )
+        audioOrchestrator.start(lifecycleScope)
 
-        // 2) Firestore poller via REST. Polling 10s para vídeo/volume e 1s
-        //    para chamadas (config/announce). Sem SDK Firebase, sem gRPC.
+        // 1) Estado inicial vindo do cache (resposta imediata, antes do Firestore).
+        val cachedVolume = cache.loadVolume()
+        audioOrchestrator.setVideoBaseVolume(cachedVolume)
+        cache.loadVideoId()?.let { cachedId ->
+            Log.i(TAG, "cache → videoId=$cachedId, volume=$cachedVolume")
+            loadVideoId(cachedId)
+        } ?: Log.i(TAG, "sem cache; aguardando Firestore")
+
+        // 2) Firestore poller via REST. Polling 10s para vídeo/volume/áudio e
+        //    1s para chamadas (config/announce). Sem SDK Firebase, sem gRPC.
         firestorePoller = FirestorePoller(
             projectId = FIRESTORE_PROJECT_ID,
             apiKey = FIRESTORE_API_KEY,
@@ -120,10 +131,23 @@ class MainActivity : AppCompatActivity() {
             },
             onVolumeChanged = { percent ->
                 cache.saveVolume(percent)
-                videoPlayerManager.setVolume(percent)
+                audioOrchestrator.setVideoBaseVolume(percent)
             },
             onCallStateChanged = { idle, nome, sala ->
-                callOverlay.applyState(idle, nome, sala)
+                // Idle=true do Firestore não esconde overlay aqui — quem
+                // controla é o orchestrator, que mantém visível por 10s
+                // pós-fala. Só enfileira chamadas novas.
+                if (!idle && !nome.isNullOrBlank() && !sala.isNullOrBlank()) {
+                    audioOrchestrator.enqueueCall(nome, sala)
+                }
+            },
+            onAudioConfigChanged = { cfg ->
+                audioOrchestrator.duckVolume = cfg.duckVolume
+                audioOrchestrator.ttsVolume = cfg.announceVolume
+                audioOrchestrator.leadMs = cfg.leadMs
+                audioOrchestrator.template = cfg.template
+                // Se não há slider ytVolume definido, usa restoreVolume como
+                // base. Se houver, ytVolume já foi aplicado em onVolumeChanged.
             }
         )
         firestorePoller.start()
@@ -144,6 +168,8 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         firestorePoller.stop()
+        audioOrchestrator.stop()
+        ttsManager.release()
         callOverlay.stop()
         currentJob?.cancel()
         refreshJob?.cancel()
@@ -153,24 +179,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        // Tecla BACK: alterna entre simular uma chamada de teste e esconder.
-        // Útil para validar a UI da chamada sem precisar do admin web.
-        // Será substituída pela lógica de TTS na Fase 5.
+        // Tecla BACK: dispara uma chamada de teste local, com TTS, duck e
+        // restore — exatamente como uma chamada real do admin. Útil para
+        // validar tudo sem mexer no admin web.
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            if (testCallShowing) {
-                Log.i(TAG, "BACK pressed → esconder chamada de teste")
-                callOverlay.hideCall()
-            } else {
-                Log.i(TAG, "BACK pressed → mostrar chamada de teste")
-                callOverlay.showCall("FERNANDO AZEVEDO", "Consultório 2")
-            }
-            testCallShowing = !testCallShowing
+            Log.i(TAG, "BACK pressed → enfileirando chamada de teste")
+            audioOrchestrator.enqueueCall("Fernando Azevedo", "2")
             return true
         }
         return super.onKeyDown(keyCode, event)
     }
-
-    private var testCallShowing = false
 
     /**
      * Extrai o `videoId` do YouTube e reproduz. Cancela qualquer extração
