@@ -11,6 +11,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.PlayerView
+import com.oftalmocenter.tv.cache.CacheManager
+import com.oftalmocenter.tv.firestore.FirestoreService
 import com.oftalmocenter.tv.player.StreamSource
 import com.oftalmocenter.tv.player.VideoPlayerManager
 import com.oftalmocenter.tv.player.YouTubeExtractor
@@ -20,16 +22,16 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * MainActivity — Fase 2 (YouTube nativo via NewPipe Extractor).
+ * MainActivity — Fase 3 (Firestore + cache + controle remoto de vídeo).
  *
- * Pega uma URL do YouTube, extrai a URL real de stream em background,
- * entrega ao ExoPlayer e agenda re-extração preventiva. Em caso de erro
- * de fonte (URL expirada, 403), re-extrai com backoff exponencial.
+ * O `videoId` e o `ytVolume` agora vêm do Firestore (`config/main` e
+ * `config/control`), em tempo real. Mudanças no painel admin web
+ * refletem na TV em segundos. Offline / sem internet, o último estado
+ * conhecido é restaurado do cache local.
  *
- * Sem WebView, sem Firestore, sem TTS. Esses entram em fases seguintes.
- *
- * Mantido da Fase 1: WakeLock FULL_WAKE_LOCK, fullscreen/imersivo,
- * BootReceiver inalterado.
+ * Mantido das fases anteriores: WakeLock, fullscreen/imersivo,
+ * BootReceiver, ExoPlayer com hardware decoder, NewPipe Extractor,
+ * re-extração preventiva e por erro de fonte.
  */
 @UnstableApi
 class MainActivity : AppCompatActivity() {
@@ -37,24 +39,28 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
 
-        // URL do YouTube de teste (Fase 2). Será trocada pelo Firestore na Fase 3.
-        private const val YOUTUBE_URL = "https://www.youtube.com/watch?v=PRAGLqfNK1o"
-
         // Re-extração preventiva: streams do YouTube costumam expirar entre 4-6h;
         // 3h dá uma boa margem para refresh transparente antes do 403.
         private const val REFRESH_INTERVAL_MS = 3 * 60 * 60 * 1000L
 
         // Backoff de retry após erro: 5s, 10s, 20s, 40s, 60s, 60s, ...
         private val BACKOFF_STEPS_MS = longArrayOf(5_000, 10_000, 20_000, 40_000, 60_000)
+
+        private fun youtubeUrlFromId(id: String) = "https://www.youtube.com/watch?v=$id"
     }
 
     private lateinit var playerView: PlayerView
     private lateinit var videoPlayerManager: VideoPlayerManager
-    private var wakeLock: PowerManager.WakeLock? = null
+    private lateinit var cache: CacheManager
+    private lateinit var firestoreService: FirestoreService
 
+    private var wakeLock: PowerManager.WakeLock? = null
     private var currentJob: Job? = null
     private var refreshJob: Job? = null
     private var consecutiveFailures = 0
+
+    /** Último videoId efetivamente carregado no player. Evita reload desnecessário. */
+    private var loadedVideoId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,15 +71,45 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         playerView = findViewById(R.id.player_view)
 
+        cache = CacheManager(this)
         videoPlayerManager = VideoPlayerManager(this)
         videoPlayerManager.onSourceError = { error ->
             Log.w(TAG, "source error → re-extraindo. code=${error.errorCodeName}")
-            loadYouTube(YOUTUBE_URL, isRetry = true)
+            loadedVideoId?.let { loadVideoId(it, isRetry = true) }
         }
         playerView.player = videoPlayerManager.player
         playerView.useController = false
 
-        loadYouTube(YOUTUBE_URL)
+        // 1) Estado inicial vindo do cache (resposta imediata, antes do Firestore).
+        cache.loadVideoId()?.let { cachedId ->
+            Log.i(TAG, "cache → videoId = $cachedId")
+            videoPlayerManager.setVolume(cache.loadVolume())
+            loadVideoId(cachedId)
+        } ?: run {
+            videoPlayerManager.setVolume(cache.loadVolume())
+            Log.i(TAG, "sem cache; aguardando Firestore")
+        }
+
+        // 2) Firestore listeners (atualizam quando admin mexer no painel web).
+        firestoreService = FirestoreService(
+            onVideoIdChanged = { videoId ->
+                if (videoId.isNullOrBlank()) {
+                    Log.w(TAG, "videoId vazio recebido do Firestore — ignorando")
+                    return@FirestoreService
+                }
+                if (videoId == loadedVideoId) {
+                    Log.i(TAG, "videoId inalterado ($videoId) — sem reload")
+                    return@FirestoreService
+                }
+                cache.saveVideoId(videoId)
+                loadVideoId(videoId)
+            },
+            onVolumeChanged = { percent ->
+                cache.saveVolume(percent)
+                videoPlayerManager.setVolume(percent)
+            }
+        )
+        firestoreService.start()
     }
 
     override fun onResume() {
@@ -90,37 +126,40 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        releaseWakeLock()
+        firestoreService.stop()
         currentJob?.cancel()
         refreshJob?.cancel()
         playerView.player = null
         videoPlayerManager.release()
+        releaseWakeLock()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            Log.i(TAG, "BACK pressed → re-extrair YouTube")
-            loadYouTube(YOUTUBE_URL)
+            Log.i(TAG, "BACK pressed → re-extrair vídeo atual")
+            loadedVideoId?.let { loadVideoId(it) }
             return true
         }
         return super.onKeyDown(keyCode, event)
     }
 
     /**
-     * Extrai e reproduz a URL do YouTube. Cancela qualquer extração em
-     * andamento. Em caso de erro, agenda retry com backoff. Em caso de
+     * Extrai o `videoId` do YouTube e reproduz. Cancela qualquer extração
+     * em andamento. Em caso de erro, agenda retry com backoff. Em caso de
      * sucesso, agenda re-extração preventiva em 3h.
      */
-    private fun loadYouTube(youtubeUrl: String, isRetry: Boolean = false) {
+    private fun loadVideoId(videoId: String, isRetry: Boolean = false) {
         currentJob?.cancel()
         refreshJob?.cancel()
 
+        val youtubeUrl = youtubeUrlFromId(videoId)
         currentJob = lifecycleScope.launch {
             try {
                 val source: StreamSource = YouTubeExtractor.extract(youtubeUrl)
                 consecutiveFailures = 0
+                loadedVideoId = videoId
                 videoPlayerManager.playStream(source)
-                scheduleRefresh(youtubeUrl)
+                scheduleRefresh(videoId)
             } catch (ce: CancellationException) {
                 throw ce
             } catch (t: Throwable) {
@@ -130,20 +169,20 @@ class MainActivity : AppCompatActivity() {
                 ]
                 Log.e(
                     TAG,
-                    "extração falhou (#$consecutiveFailures) — retry em ${backoffMs}ms: ${t.message}",
+                    "extração falhou (#$consecutiveFailures, videoId=$videoId) — retry em ${backoffMs}ms: ${t.message}",
                     t
                 )
                 delay(backoffMs)
-                loadYouTube(youtubeUrl, isRetry = true)
+                loadVideoId(videoId, isRetry = true)
             }
         }
     }
 
-    private fun scheduleRefresh(youtubeUrl: String) {
+    private fun scheduleRefresh(videoId: String) {
         refreshJob = lifecycleScope.launch {
             delay(REFRESH_INTERVAL_MS)
-            Log.i(TAG, "refresh preventivo (3h) → re-extraindo")
-            loadYouTube(youtubeUrl)
+            Log.i(TAG, "refresh preventivo (3h) → re-extraindo $videoId")
+            loadVideoId(videoId)
         }
     }
 

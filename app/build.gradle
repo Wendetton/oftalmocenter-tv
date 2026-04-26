@@ -1,6 +1,7 @@
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+    id 'com.google.gms.google-services'
 }
 
 android {
@@ -88,8 +89,14 @@ dependencies {
     // OkHttp — usado pela nossa implementação de Downloader do NewPipe.
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
+    // Firebase Firestore (sem autenticação — as Security Rules do projeto
+    // webtv-ee904 são abertas para os paths usados, igual ao app web).
+    implementation platform('com.google.firebase:firebase-bom:33.7.0')
+    implementation 'com.google.firebase:firebase-firestore-ktx'
+
     // Coroutines (usado pelo VideoPlayerManager e fases futuras)
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3'
 
     // Variante "_nio" do desugar_jdk_libs: cobre java.time + java.nio +
     // java.net.URLDecoder.decode(String, Charset) usado pelo NewPipe.
